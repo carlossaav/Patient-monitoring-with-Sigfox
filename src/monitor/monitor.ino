@@ -1,81 +1,87 @@
 #define USE_ARDUINO_INTERRUPTS false
 #include <PulseSensorPlayground.h>
 #include <SigFox.h>
+#include <MsTimer2.h>
 
 #define PULSE_PIN 0       // PulseSensor WIRE connected to ANALOG PIN 0
 #define TEMPERATURE_PIN 1 // LM-35 signal connected to ANALOG PIN 1
-#define BUTTON_PIN 2      // Alarm Button pin connected to ANALOG PIN 2
+#define BUTTON_PIN      // Alarm Button pin connected to
 
 #define PULSE_THRESHOLD 535 // Determine which Signal to "count as a beat" and which to ignore                               
 
 #define PULSESENSOR_LED  // indicates that pulsesensor is not working
 
-#define MAX_BPM_LIMIT 125
-#define MIN_BPM_LIMIT 60
-#define MAX_IBI_LIMIT 
-#define MIN_IBI_LIMIT 
-#define MAX_TEMP_LIMIT 37.5
-#define MIN_TEMP_LIMIT 35.5
+#define UPPER_BPM_LIMIT 125
+#define LOWER_BPM_LIMIT 60
+#define UPPER_IBI_LIMIT 
+#define LOWER_IBI_LIMIT 
+#define UPPER_TEMP_LIMIT 37.5
+#define LOWER_TEMP_LIMIT 35.5
 
-#define BPM_IBI_BUFFER_SIZE 
-#define TEMP_BUFFER_SIZE 12 // Measure temperature once per minute
+#define MAX_BPM_SAMPLES 
+#define MAX_IBI_SAMPLES
+#define MAX_TEMP_SAMPLES 12 // Measure temperature once per minute
+
 #define RECEIVING_BUFFER_SIZE 8
 #define SHIPMENT_BUFFER_SIZE 12
 
 #define REPORT_MSG
+#define EMERGENCY_LIMITS_MSG
 #define EMERGENCY_MSG
 #define LIMITS_MSG
-#define EMERGENCY_LIMITS_MSG
 #define ERROR_MSG
 
-#define EMERGENCY_MSG_DELAY
-#define LIMIT_MSG_DELAY
-#define ERROR_MSG_DELAY
+//#define REPORT_MSG_DELAY
+#define EMERGENCY_MSG_DELAY 180000 // wait 3 mins before shipping another EMERGENCY_MSG
+#define LIMITS_MSG_DELAY 300000 // wait 5 mins here
+//#define ERROR_MSG_DELAY
 
 #define SHIPMENT_INTERVAL 720000  // 12 min
-#define SAMPLING_DELAY
-//#define ERROR_CONDITION 60000
+//#define SAMPLING_DELAY
+#define TEST_ERROR_CONDITION 15000
+#define BUG_FLASH 3000 // keep the led 3000 milliseconds set to LOW or HIGH on error
 
 #define MAX_SHIPMENT_ATTEMPTS // In case of failed shipments
 
 // To reset stored measurements
 #define BPM_RESET 0
-#define IBI_RESET -1
-#define TEMP_RESET -200.0
+#define IBI_RESET 0
+#define TEMP_RESET 0.0
 
 /** Variables **/
 
 struct msg_format {
 }
 
-struct limit {
-//  String measure;
-  float worse_value;
-  int count;
-}
+/* measurements to send*/
+volatile byte max_bpm, min_bpm;
+volatile int max_ibi, min_ibi;
+volatile float avg_bpm, avg_ibi, sd_bpm, sd_ibi;
+// variances/modes?
 
-/* some measurements */
-volatile byte max_bpm_value, min_bpm_value;
-volatile int max_ibi_value, min_ibi_value;
-
-// missing temperature vars
 
 /* sampling buffers */
-volatile byte bpm_hist[BPM_IBI_BUFFER_SIZE];
-volatile int ibi_hist[BPM_IBI_BUFFER_SIZE]; // evaluate data type
-volatile float temp_hist[TEMP_BUFFER_SIZE];
+volatile byte bpm_hist[MAX_BPM_SAMPLES];
+volatile int ibi_hist[MAX_IBI_SAMPLES]; // evaluate data type
+volatile float temp_hist[MAX_TEMP_SAMPLES];
 
 /* buffers for sending and receiving */
 byte recv_buff[RECEIVING_BUFFER_SIZE];
 byte send_buff[SHIPMENT_BUFFER_SIZE];
 
-// maxs and mins of every body measure. For LIMITS_MSG purposes
-struct limit pending_buff[6];
+/*
+  For every body measurement limit, limits_exceeded_counter stores how many
+  times that limit has been exceeded. For LIMITS_MSG purposes.
+  - limits_exceeded_counter[0][1] for upper and lower bpm limit counts
+  - limits_exceeded_counter[2][3] for upper and lower ibi limit counts
+  - limits_exceeded_counter[4][5] for upper and lower temp limit counts
+*/
+volatile int limits_exceeded_counter[6];
 
 /* counters */
 volatile byte count_messages; // sent messages
-volatile int bpm_ibi_sample_counter; // for sampling between shipments
-volatile short temp_sample_counter;
+volatile short bpm_ibi_sample_counter;
+volatile byte temp_sample_counter;
 
 /* shipment timestamps */
 volatile unsigned long last_msg;
@@ -83,23 +89,29 @@ volatile unsigned long emergency_msg_tstamp;
 volatile unsigned long limit_exceeded_msg_tstamp;
 volatile unsigned long err_msg_tstamp;
 
-volatile unsigned long err_cond_tstamp;
+volatile unsigned long sigfox_err_tstamp;
 
-// PulseSensorPlayground object
+/* used when shipment occured before SHIPMENT_INTERVAL (e.g. button_pushed) */
+volatile unsigned long acc_shipment_delay;
+
+/* For failed EMERGENCY_MSG shipments */
+volatile byte failed_emergency_msg;
+
 PulseSensorPlayground pulseSensor;
+
 
 void setup() {
 
   // Sigfox module id, used as a device identifier
-  const int device_id;
+  const int device_id; // Does SigFox backend provide an id for Monitor service?
   byte first_shipment = 1;
+  unsigned long pulse_sensor_err_tstamp = 0;
 
-  err_cond_tstamp = 0;
   err_msg_tstamp = 0; // read from flash?
+  sigfox_err_tstamp = 0;
 
   if !(init_sigfox_module()) {
     // implement behaviour
-    return;
   }
 
   device_id = SigFox.ID().toInt();
@@ -114,70 +126,65 @@ void setup() {
   last_msg = 0;
   emergency_msg_tstamp = 0;
   limit_exceeded_msg_tstamp = 0;
+  acc_shipment_delay = 0;
 
-  attachInterrupt(digitalPinToInterrupt(1), button_pushed, RISING);
-  attachInterrupt(digitalPinToInterrupt(4), get_temperature, RISING);
+  failed_emergency_msg = 0;
 
   pinmode(TEMPERATURE_PIN,INPUT); // LM-35 signal
-  pinmode(BUTTON_PIN,INPUT); // Alarm button
+  pinmode(BUTTON_PIN,INPUT); // button press
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), button_pushed, RISING);
 
   // Configure the PulseSensor object, by assigning our variables to it. 
   pulseSensor.analogInput(PULSE_PIN);
-  pulseSensor.blinkOnPulse(LED_BUILTIN);  //auto-magically blink Arduino's LED with heartbeat.
+  pulseSensor.blinkOnPulse(PULSESENSOR_LED);  //auto-magically blink Arduino's LED with heartbeat.
   pulseSensor.setThreshold(PULSE_THRESHOLD);
 
-  if (!pulseSensor.begin()) {
-    err_cond_tstamp = milis();
+  reset_vars();
+  /*
+  while (!pulseSensor.begin()) {
+    if !(pulse_sensor_err_tstamp)
+      pulse_sensor_err_tstamp = millis();
     send_error_report();
-    while ((millis() - err_cond_tstamp) < ERROR_CONDITION)
+    while ((millis() - pulse_sensor_err_tstamp) < TEST_ERROR_CONDITION)
       flash_led(PULSESENSOR_LED);
   }
-
-  reset_vars(BPM_IBI_BUFFER_SIZE, TEMP_BUFFER_SIZE);
+  */
 }
+
 
 // blocking function
 // Flash LED_BUILTIN||PULSESENSOR_LED to show things didn't work.
 void flash_led(int led) {
-  short miliseconds;
-
-  if (led == LED_BUILTIN)
-    miliseconds = 3000;
-  else
-    miliseconds = 5000;
-
   digitalWrite(led, LOW);
-  delay(miliseconds);
+  delay(BUG_FLASH);
   digitalWrite(led, HIGH);
-  delay(miliseconds);
+  delay(BUG_FLASH);
 }
 
-
-void reset_vars(int bpm_ibi_samples, int temp_samples) {
-
+/* developing
+void reset_vars() {
   // Initialize these vars to unlikely (impossible) values
-  max_bpm_value = BPM_RESET;
-  min_bpm_value = BPM_RESET + 255;
-  max_ibi_value = IBI_RESET;
-  min_ibi_value = IBI_RESET + ?;
-  average_bpm = BPM_RESET;
-  average_ibi = IBI_RESET;
-  typical_deviation_bpm = -1.0;
-  typical_deviation_ibi = -1.0;
-
-  // missing temperature vars
-
+  max_bpm = BPM_RESET;
+  min_bpm = BPM_RESET + 255;
+  avg_bpm = float(BPM_RESET);
+  sd_bpm = -1.0;
+  max_ibi = IBI_RESET;
+  min_ibi = IBI_RESET + ?;
+  avg_ibi = float(IBI_RESET);
+  sd_ibi = -1.0;
+  //variances?
+  
   // reset sampling buffers for a new sampling interval
-  for (int i=0; i<bpm_ibi_samples; i++)
+  for (int i=0; i<MAX_BPM_SAMPLES; i++)
     bpm_hist[i] = BPM_RESET;
-  for (int i=0; i<bpm_ibi_samples; i++)
+  for (int i=0; i<MAX_IBI_SAMPLES; i++)
     ibi_hist[i] = IBI_RESET;
-  for (int i=0; i<temp_samples; i++)
+  for (int i=0; i<MAX_TEMP_SAMPLES; i++)
     temp_hist[i] = TEMP_RESET;
-  for (int i=0; i<6; i++) {
-    pending_buff[i].worse_value = -1.0; // think it twice
-    pending_buff[i].count = 0;
-  }
+  
+  // reset pending measurements exceeded
+  for (int i=0; i<6; i++)
+    limits_exceeded_counter[i].count = 0;
 
   // reset sending and receiving buffers
   for (int i=0; i<SHIPMENT_BUFFER_SIZE; i++)
@@ -188,13 +195,13 @@ void reset_vars(int bpm_ibi_samples, int temp_samples) {
   bpm_ibi_sample_counter = 0;
   temp_sample_counter = 0;
 }
-
+*/
 
 /*
   Attributes on flash:
     - data plan (max_messages)
     - sent messages counter (count_messages)
-    - accumulated shipment delay (used when shipment interval <12 min, i.e. button_pushed)
+    - accumulated shipment delay (acc_shipment_delay)
     - last message timestamp (last_msg)
     - last EMERGENCY_MSG timestamp (emergency_msg_tstamp)
     - last LIMITS_MSG timestamp (limit_exceeded_msg_tstamp)
@@ -206,10 +213,9 @@ void update_flash(unsigned long last_msg, int max_messages) {
 
 /*
 int init_sigfox_module() {
-  // Sigfox shield error
-  if (!SigFox.begin()) {
-    err_cond_tstamp = milis();
-    while ((millis() - err_cond_tstamp) < ERROR_CONDITION)
+  sigfox_err_tstamp = millis();
+  while (!SigFox.begin()) { // Sigfox shield error
+    while ((millis() - sigfox_err_tstamp) < TEST_ERROR_CONDITION)
       flash_led(LED_BUILTIN);
     return 0;
   }
@@ -217,39 +223,70 @@ int init_sigfox_module() {
 }
 */
 
+
 /*
   Returns 1 on successful shipment,
   otherwise returns 0.
 */
-/*
-byte send_msg() {
-  byte avg_bpm;
-  int avg_ibi;
-  float typical_deviation_bpm, typical_deviation_ibi;
-// variances?
-  byte attempts;
 
-  if !(init_sigfox_module()) {
-    // implement behaviour
+byte send_msg() {
+  byte attempts = 1;
+  String msg_type = // cast(get first three bits from send_buff)
+  unsigned long previous_shipment = last_msg;
+
+  if !(init_sigfox_module())
     return 0;
+
+  // compute measurements
+
+  if (msg_type != LIMITS_MSG) {
+    // check if any measurement has been exceeded
+    for (int=0; i<6; i++)
+      if (limits_exceeded_counter[i].count) {
+        // limits_exceeded at some point but couldnt send report
+        switch (msg_type) {
+          case EMERGENCY_MSG:
+            set_msg_type(EMERGENCY_LIMITS_MSG, first_shipment);
+          case REPORT_MSG:
+            if (failed_emergency_msg)
+              set_msg_type(EMERGENCY_LIMITS_MSG, first_shipment);
+            else
+              set_msg_type(LIMITS_MSG, first_shipment);
+       // case ERROR_MSG??
+        }
+        break;
+      }
+  }
+  
+  if (failed_emergency_msg) {
+    switch (msg_type) {
+      case LIMITS_MSG:
+        set_msg_type(EMERGENCY_LIMITS_MSG, first_shipment);
+      default // msg_type == EMERGENCY_MSG/REPORT_MSG/ERROR_MSG
+        set_msg_type(EMERGENCY_MSG, first_shipment);
+    }
   }
 
-  // compute averages, typical deviation, etc. 
+  // configure payload (based on msg_type) on send_buff
+  // in case of LIMITS_MSG||EMERGENCY_LIMITS_MSG send also limits_exceeded_counter values
+  // compress payload (based on msg_type?)
 
-  // limits_exceeded at some point but couldnt send measures
-  if (pending_buff no vacío) // consider first_shipment
-    case
-      first 3 bits == EMERGENCY_MSG
-        set first 3 bits to EMERGENCY_LIMITS_MSG
-      first 3 bits == REPORT_MSG
-        set first 3 bits to LIMITS_MSG
-
-  // introduce data on send_buff
-
-  attempts = 1;
-  while (attempts <= MAX_SHIPMENT_ATTEMPTS) {
+  while (1) {
     if (call to sigfox backend) {
       last_msg = millis();
+      /* x, x+3-> x+3+12+9 problem. Developing
+      if ((last_msg - previous_shipment) < SHIPMENT_INTERVAL) {
+        set_shipment_timer(SHIPMENT_INTERVAL);
+      }
+      */
+      if (failed_emergency_msg) {
+        /*** 
+         set here to 0 (not on button_pushed()) because
+         a message != EMERGENCY_MSG may occur before
+         a pending EMERGENCY_MSG would be triggered again
+         ***/
+        failed_emergency_msg = 0;
+      }
       if (first_shipment) {
         // wait response (x time), get data
         if response
@@ -257,153 +294,212 @@ byte send_msg() {
       }
       break;
     }
-    if (++attempts > MAX_SHIPMENT_ATTEMPTS)
-      break; // avoid last delay
-    // delay next attempt
+    // Failed shipment
+    if (++attempts > MAX_SHIPMENT_ATTEMPTS) {
+      SigFox.end();
+      return 0;
+    }
+    // delay next attempt (timer)?
   }
 
-  // Failed shipment. Samples lost?
-  if (attempts > MAX_SHIPMENT_ATTEMPTS) {
-    // implement behaviour
-    return 0;
-  }
-
-
-  if (first 3 bits == EMERGENCY_LIMITS_MSG) {
-    emergency_msg_tstamp = last_msg;
-    limit_exceeded_msg_tstamp = last_msg;
-  }
-  else
-    if (first 3 bits == LIMITS_MSG)
+  // set timestamps (REPORT_MSG uses last_msg timestamp)
+  switch (msg_type) {
+    case EMERGENCY_LIMITS_MSG:
+      emergency_msg_tstamp = last_msg;
       limit_exceeded_msg_tstamp = last_msg;
+      break;
+    case LIMITS_MSG:
+      limit_exceeded_msg_tstamp = last_msg;
+      break;
+    case EMERGENCY_MSG:
+      emergency_msg_tstamp = last_msg;
+      break;
+    case ERROR_MSG:
+      err_msg_tstamp = last_msg;
+      break;
+  }
 
   count_messages++;
   update_flash(last_msg, max_messages);
-  reset_vars(bpm_ibi_sample_counter, temp_sample_counter);
+  reset_vars();
   SigFox.end();
 
   return 1;
 }
 
-
-void handle_failed_shipment(byte msg_type) {
+/*
+void set_shipment_timer(unsigned long miliseconds) {
 }
 
-void set_msg_type(byte msg_type) {
-  // set first three bits to msg_type on send_buff
+void handle_failed_shipment(byte msg_type, unsigned long tstamp) {
+  set_shipment_timer(); // Retry automatically in X miliseconds -> based on msg_type
+  // Samples lost?
+}
+
+void set_msg_type(String msg_type, byte first_shipment) {
   if (first_shipment)
     // set first three bits to msg_type + initial_msg on send_buff
+  else
+    // set first three bits to msg_type on send_buff
 }
 
 */
 
-/*
-  Interrupt Service Routines:
-    - get_temperature() -> triggered once per second to measure body temperature
-    - button_pushed() -> triggered whenever the user pushes the emergency button
-    - send_common_report() -> triggered every SHIPMENT_INTERVAL miliseconds to send biometric data
-                              to the Sigfox backend
-*/
 
-/*
+// triggered once per minute (by timer?) to measure body temperature
 void get_temperature() {
   float temperature = // Compute temperature on TEMPERATURE_PIN;
   temp_hist[temp_sample_counter] = temperature;
   temp_sample_counter++;
 
-  if (check_value(temperature))
-    limits_exceeded();
+  if (check_upper_limit(temperature))
+    limit_exceeded(4, millis());
+  else
+    if (check_lower_limit(temperature))
+      limit_exceeded(5, millis());
 }
 
 
+/**
+  Interrupt Service Routine button_pushed()
+    -> triggered whenever the user pushes the emergency button
+**/
+/*
 void button_pushed() {
-  // check if an EMERGENCY_MSG has been sent
-  if (emergency_msg_tstamp != 0)
-    if ((millis() - emergency_msg_tstamp) < EMERGENCY_MSG_DELAY))
-      return;
+  // noInterrupts();
+  unsigned long tstamp = millis();
+
+  // check if an EMERGENCY_MSG has been sent recently
+  if ((emergency_msg_tstamp != 0) && 
+      ((tstamp - emergency_msg_tstamp) < EMERGENCY_MSG_DELAY))
+    return; // actually the same emergency
 
   if (count_messages == max_messages) {
-    handle_failed_shipment(EMERGENCY_MSG);
+    failed_emergency_msg = 1;
+    handle_failed_shipment(EMERGENCY_MSG, tstamp);
     return;
   }
-  set_msg_type(EMERGENCY_MSG);
-  if !(send_msg())
-    handle_failed_shipment(EMERGENCY_MSG);
+
+  set_msg_type(EMERGENCY_MSG, first_shipment);
+  failed_emergency_msg = !(send_msg());
+  if (failed_emergency_msg)
+    handle_failed_shipment(EMERGENCY_MSG, tstamp);
+
+//  if !(send_msg()) {
+//    failed_emergency_msg = 1;
+//    handle_failed_shipment(EMERGENCY_MSG, tstamp);
+//  }
+
+  // interrupts();
 }
 
+
+// triggered every SHIPMENT_INTERVAL miliseconds (by timer)
+// to send biometric data to the Sigfox backend
 void send_common_report() {
+  unsigned long tstamp = millis();
   if (count_messages == max_messages) {
-    handle_failed_shipment(REPORT_MSG);
+    handle_failed_shipment(REPORT_MSG, tstamp);
     return;
   }
-  set_msg_type(REPORT_MSG);
+  set_msg_type(REPORT_MSG, first_shipment);
   if !(send_msg())
-    handle_failed_shipment(REPORT_MSG);
+    handle_failed_shipment(REPORT_MSG, tstamp);
 }
 
 
 void send_error_report() {
+  unsigned long tstamp = millis();
+
   // check if an ERROR_MSG has been sent
-  if (err_msg_tstamp != 0)
-    if ((millis() - err_msg_tstamp) < ERROR_MSG_DELAY))
+  if ((err_msg_tstamp != 0) &&
+     ((tstamp - err_msg_tstamp) < ERROR_MSG_DELAY))
       return;
 
   if (count_messages == max_messages) {
-    handle_failed_shipment(ERROR_MSG);
+    handle_failed_shipment(ERROR_MSG, tstamp);
     return;
   }
-  set_msg_type(ERROR_MSG);
+  set_msg_type(ERROR_MSG, first_shipment);
   if !(send_msg())
-    handle_failed_shipment(ERROR_MSG);
+    handle_failed_shipment(ERROR_MSG, tstamp);
 }
 
 
-void limits_exceeded() {
-  // check if a LIMITS_MSG has been sent
-  if (limit_exceeded_msg_tstamp != 0)
-    if ((millis() - limit_exceeded_msg_tstamp) < LIMIT_MSG_DELAY))
-      return;
+void limit_exceeded(byte measure, unsigned long tstamp) {
 
-  if (count_messages == max_messages) {
-    handle_failed_shipment(LIMITS_MSG);
+  limits_exceeded_counter[measure].count++;
+
+  // check if an EMERGENCY_MSG has been sent recently
+  if ((emergency_msg_tstamp != 0) &&
+     ((tstamp - emergency_msg_tstamp) < EMERGENCY_MSG_DELAY))
+  {
+    handle_failed_shipment(LIMITS_MSG, tstamp);
     return;
   }
-  set_msg_type(LIMITS_MSG);
-  if !(send_msg())
-    handle_failed_shipment(LIMITS_MSG);
+
+  // check if a LIMITS_MSG has been sent recently
+  if ((limit_exceeded_msg_tstamp != 0) &&
+      ((tstamp - limit_exceeded_msg_tstamp) < LIMITS_MSG_DELAY))
+  {
+    handle_failed_shipment(LIMITS_MSG, tstamp);
+    return;
+  }
+
+  if (count_messages == max_messages) {
+    handle_failed_shipment(LIMITS_MSG, tstamp);
+    return;
+  }
+  set_msg_type(LIMITS_MSG, first_shipment);
+  if !(send_msg()) {
+    handle_failed_shipment(LIMITS_MSG, tstamp);
+    return;
+  }
 }
 */
 
 /*
-  check_value() and check_values():
-    Both return 0 for values within the range,
-    and 1 when limits have been exceeded
+  Overloaded function series to check if any 
+  limit has been exceeded
 */
-byte check_value(float temperature) {
-  if ((temperature > MAX_TEMP_LIMIT) || (temperature < MIN_TEMP_LIMIT))
-    return 1;
-  return 0;
+
+byte check_upper_limit(float temperature) {
+  return (temperature > UPPER_TEMP_LIMIT);
 }
 
-byte check_values(byte bpm, int ibi) {
-  if (((bpm > MAX_BPM_LIMIT) || (bpm < MIN_BPM_LIMIT)) ||
-      ((ibi > MAX_IBI_LIMIT) || (ibi < MIN_IBI_LIMIT)))
-    return 1;
-  return 0;
+byte check_upper_limit(byte bpm) {
+  return (bpm > UPPER_BPM_LIMIT);
 }
+
+byte check_upper_limit(int ibi) {
+  return (ibi > UPPER_IBI_LIMIT);
+}
+
+byte check_lower_limit(float temperature) {
+  return (temperature < LOWER_TEMP_LIMIT);
+}
+
+byte check_lower_limit(byte bpm) {
+  return (bpm < LOWER_BPM_LIMIT);
+}
+
+byte check_lower_limit(int ibi) {
+  return (ibi < LOWER_IBI_LIMIT);
+}
+
 
 void set_max_and_min(byte bpm, int ibi) {
-  if (bpm > max_bpm_value)
-    max_bpm_value = bpm;
+  if (bpm > max_bpm)
+    max_bpm = bpm;
   else
-    if (bpm < min_bpm_value)
-      min_bpm_value = bpm;
+    if (bpm < min_bpm)
+      min_bpm = bpm;
 
-  if (ibi > max_ibi_value)
-    max_ibi_value = ibi;
+  if (ibi > max_ibi)
+    max_ibi = ibi;
   else
-    if (ibi < min_ibi_value)
-      min_ibi_value = ibi;
+    if (ibi < min_ibi)
+      min_ibi = ibi;
 }
 
 byte bytecast(int bpm) {
@@ -415,9 +511,7 @@ byte bytecast(int bpm) {
   return byte(bpm);
 }
 
-
 void loop() {
-
   byte bpm;
   int ibi;
 
@@ -429,7 +523,7 @@ void loop() {
   */
 
   if (pulseSensor.sawNewSample()) {
-    // reduce sampling (32K SRAM)
+    // reduce sampling (32kb SRAM)
     bpm = bytecast(pulseSensor.getBeatsPerMinute());
     ibi = pulseSensor.getInterBeatIntervalMs();
     bpm_hist[bpm_ibi_sample_counter] = bpm;
@@ -438,16 +532,26 @@ void loop() {
 
     set_max_and_min(bpm, ibi);
 
-    // check if bpm or ibi values exceeded limits
-    if (check_values(bpm, ibi))
-      limits_exceeded();
+    //check limits
+    if (check_upper_limit(bpm))
+      limit_exceeded(0, millis());
+    else
+      if (check_lower_limit(bpm))
+        limit_exceeded(1, millis());
 
-    /*******
-     Here is a good place to add code that could take up
-     to a milisecond or so to run.
-     *******/
+    if (check_upper_limit(ibi))
+      limit_exceeded(2, millis());
+    else
+      if (check_lower_limit(ibi))
+        limit_exceeded(3, millis());
+
+      /*******
+       Here is a good place to add code that could take up
+       to a milisecond or so to run.
+      *******/
   }
-
+  /*
   if (millis() - last_msg >= SHIPMENT_INTERVAL)
     send_common_report();
+  */
 }
