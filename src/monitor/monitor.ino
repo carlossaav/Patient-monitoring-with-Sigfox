@@ -11,6 +11,7 @@
 #define SENSORS_LED 7          // Blinks with every heartbeat
 #define EMERGENCY_LED 8        // Used on emergencies
 #define SIGFOX_LED LED_BUILTIN
+#define NOISE_PIN 4
 
 #define PULSE_THRESHOLD 2140   // Determine which Signal to "count as a beat" and which to ignore
 
@@ -44,22 +45,17 @@
 #define RECEIVING_BUFFER_SIZE 8
 #define SHIPMENT_BUFFER_SIZE 12
 
-#define REPORT_MSG 0
-#define LIMITS_MSG 1
-#define ALARM_MSG 2 
-#define ALARM_LIMITS_MSG 3
-#define ERROR_MSG 4
 
-/* To later process where bpm readings have been falling across the interval, 
- * we'll define a set of BPM Ranges */
-#define LOWER_THAN_FIFTY 000
-#define FIFTY_TO_SEVENTY 001
-#define SEVENTY_TO_NINETY 010
-#define NINETY_TO_HUNDRED_TEN 011
-#define HUNDRED_TEN_TO_HUNDRED_THIRTY 100
-#define HUNDRED_THIRTY_TO_HUNDRED_FIFTY 101
-#define HUNDRED_FIFTY_TO_HUNDRED_SEVENTY 110
-#define HIGHER_THAN_HUNDRED_SEVENTY 111
+/* Message types. Critical order** */
+#define ALARM_MSG 0
+#define LIMITS_MSG 1
+#define ALARM_LIMITS_MSG 2
+#define ERROR_MSG 3
+#define REC_ALARM_MSG 4
+#define REC_LIMITS_MSG 5
+#define REC_ALARM_LIMITS_MSG 6
+#define REPORT_MSG 7
+
 
 // Time before enabling 'critical' emergency shipment's rate again
 #define NEW_EMERG_DELAY 1200000 // 20 min
@@ -84,8 +80,10 @@
 
 
 // Default values on Temperature or PulseSensor errors
-#define BPM_READING_ERR -1
+#define BPM_READING_ERR 0  // Must be positive number or zero
 #define TEMP_READING_ERR -1.0
+
+#define TEMP_MEASURING_DELAY 1200000 // Minimal delay on milliseconds to send temperature again (20 min)
 
 
 // keep the EMERGENCY_LED 2 seconds flashing on emergency
@@ -107,31 +105,45 @@
 #define REC_NON_CRITIC_ESEQ_DURATION
 */
 
+#define MAX_RECOVERY_MSG 30 // IMPORTANT, NOT SET THIS VALUE HIGHER THAN 255.
+#define MAX_RECOVERY_TIME 21600000 // 6 hours
 /** Variables **/
 
 struct msg_format {
 };
 
 // Measurements
-byte max_bpm, min_bpm;
-int max_ibi, min_ibi;
-float avg_bpm, avg_ibi, sd_bpm, sd_ibi;
-// variances/ranges?
+byte avg_bpm, max_bpm, min_bpm;
+unsigned int max_ibi, min_ibi, avg_ibi;
+unsigned int sum_bpm, sum_ibi;
+// float sd_bpm, sd_ibi;
 
-/*
+
+/* To later process where bpm readings have been falling across the interval, 
+ * we'll define a set of BPM Ranges:
+ * ranges[0] stores reading counts under 50 bpm
+ * ranges[1] stores reading counts between 50-75 bpm
+ * ranges[2] stores reading counts between 76-105 bpm
+ * ranges[3] stores reading counts between 106-130 bpm
+ * ranges[4] stores reading counts higher than 130 bpm
+ */
+byte ranges[6] = {0,0,0,0,0,0};
+
 // Sampling buffers
-byte bpm_hist[MAX_BPM_SAMPLES];
-int ibi_hist[MAX_IBI_SAMPLES]; // evaluate data type
-*/
+// byte bpm_hist[MAX_BPM_SAMPLES];
+// int ibi_hist[MAX_IBI_SAMPLES]; // evaluate data type
 
 // Buffers for sending and receiving
 byte recv_buff[RECEIVING_BUFFER_SIZE];
 byte send_buff[SHIPMENT_BUFFER_SIZE];
 
+
 /* In case the failed shipment is from
  * the payload that triggered the emergency,
  * we'll save that payload */
-byte rec_buff[SHIPMENT_BUFFER_SIZE];
+byte rec_matrix_index = 0;
+byte rec_matrix_counter = 0;
+byte rec_matrix[MAX_RECOVERY_MSG][SHIPMENT_BUFFER_SIZE];
 
 /*
   For upper and lower bpm limits, limits_exceeded stores how many
@@ -229,8 +241,7 @@ byte sigfox_err = 0;
 byte pulsesensor_err = 0;
 byte temp_err = 0;
 
-
-// byte first_ship = 1;
+byte downlink_done = 0;
 
 PulseSensorPlayground pulseSensor;
 RTCZero rtc;
@@ -244,6 +255,8 @@ void setup() {
 
   Wire.begin();
   analogReadResolution(12);
+  randomSeed(analogRead(NOISE_PIN));
+
   pinMode(INPUT_BUTTON_PIN, INPUT_PULLUP); // button press
   pinMode(SIGFOX_LED, OUTPUT);
   pinMode(SENSORS_LED, OUTPUT);
@@ -253,7 +266,6 @@ void setup() {
   digitalWrite(SIGFOX_LED, LOW);
 
   attachInterrupt(digitalPinToInterrupt(INPUT_BUTTON_PIN), button_pressed, FALLING);
-
   // read from flash?
   msg = 0;
   shipment = 0;
@@ -262,14 +274,15 @@ void setup() {
   epol_act = 0;
   epol_deact = 0;
   rpol_act = 0;
-  
+
   reset_measures();
   set_rec_seqs();
 
-  reset_buff(rec_buff);
   reset_buff(recv_buff);
   reset_buff(send_buff);
 
+  for (int i=0; i<MAX_RECOVERY_MSG; i++)
+    reset_buff(rec_matrix[i]);
 
   /* Checking  Sigfox Module... */
   sigfox_check();
@@ -319,7 +332,7 @@ void set_rec_seqs() {
 
 
 void reset_buff(byte arr[]) {
-  for (byte i=0; i<(sizeof(arr)); i++)
+  for (int i=0; i<(sizeof(arr)); i++)
     arr[i] = 0;
 }
 
@@ -388,7 +401,7 @@ void pulsesensor_check() {
     }
   }
   pulsesensor_err = 0;
-  // timer::stop
+  // timer::stop??
 }
 
 
@@ -419,6 +432,7 @@ void sigfox_check() {
     SigFox.reset();
   }
   sigfox_err = 0;
+  // timer::stop??
 }
 
 
@@ -447,30 +461,32 @@ void update_flash(unsigned long shipment) {
 
 
 void reset_measures() {
-  // Initialize these vars to unlikely (impossible) values
+
+  /* Initialize these vars to unlikely (impossible) values */
   max_bpm = 0;
   min_bpm = 255;
-  avg_bpm = 0.0;
-  sd_bpm = -1.0;
+  avg_bpm = 0;
+  sum_bpm = 0;
+  //  sd_bpm = -1.0;
+
   max_ibi = 0;
-  min_ibi = 2000;
-  avg_ibi = 0.0;
-  sd_ibi = -1.0;
+  min_ibi = 10000;
+  avg_ibi = 0;
+  sum_ibi = 0;
+  //  sd_ibi = -1.0;
 
 /* reset sampling buffers for a new sampling interval
   reset bpm_hist[];
-  reset ibi_hist[];
-*/
+  reset ibi_hist[]; */
 
-  for (byte i=0; i<2; i++)
+  for (int i=0; i<(sizeof(ranges)); i++)
+    ranges[i] = 0;
+
+  for (int i=0; i<(sizeof(limits_exceeded)); i++)
     limits_exceeded[i] = 0;
 
   bpm_ibi_sample_counter = 0;
   limits_exceeded_counter = 0;
-}
-
-
-void handle_samples() {
 }
 
 
@@ -479,6 +495,10 @@ int calc_delay() {
 
   int expected_msg, delay;
   float min_day;
+
+  // We can't delay the knowledge of date and hour, msg values
+  if (!downlink_done)
+    // DOWNLINK_MSG. Get and set parameters (msg, RTC, etc.)
 
   min_day =  rtc.getHours()*60 + rtc.getMinutes() + (((float)rtc.getSeconds())/60.0);
   expected_msg = ((int)(min_day/SHIPMENT_INTERVAL_MIN)) + REMAINING_MSG;
@@ -573,22 +593,107 @@ void resched_ship_pol(unsigned long delay) {
 }
 
 
-void handle_failed_shipment() {
+// Insert tstamp into last 4 bytes of rec_matrix[rec_matrix_index] buff
+void write_rec_tstamp(unsigned long *tstamp) {
 
-/*  byte reason_payload = ; */ // Payload already computed. Get this field from send_buff[].
+  byte *p = (byte *)tstamp;
+
+  for (int i=(SHIPMENT_BUFFER_SIZE-4), j=(sizeof (*tstamp)-1); i<SHIPMENT_BUFFER_SIZE, j>=0; i++, j--)
+    rec_matrix[rec_matrix_index][i] = p[j]; // Little endian arch
+}
+
+
+void write_dec_to_bin(byte *var, byte number, byte left_bit, byte nbits) {
+
+  /* nbits must be equal to 2 or 3 bits.
+   * Left bit is the most significant bit on *var.
+   * Higher values are more significant */
+  
+  byte right_bit;
+
+  if (nbits == 2)
+    right_bit = left_bit - 1;
+  else // nbits == 3
+    right_bit = left_bit - 2;
+    
+
+  switch (number) {
+    case 0:
+      bitWrite(*var, right_bit, 0);
+      bitWrite(*var, right_bit+1, 0);
+      if (nbits==3) bitWrite(*var, right_bit+2, 0);
+      break;
+    case 1:
+      bitWrite(*var, right_bit, 1);
+      bitWrite(*var, right_bit+1, 0);
+      if (nbits==3) bitWrite(*var, right_bit+2, 0);
+      break;
+    case 2:
+      bitWrite(*var, right_bit, 0);
+      bitWrite(*var, right_bit+1, 1);
+      if (nbits==3) bitWrite(*var, right_bit+2, 0);
+      break;
+    case 3:
+      bitWrite(*var, right_bit, 1);
+      bitWrite(*var, right_bit+1, 1);
+      if (nbits==3) bitWrite(*var, right_bit+2, 0);
+      break;
+    case 4: // nbits == 3
+      bitWrite(*var, right_bit, 0);
+      bitWrite(*var, right_bit+1, 0);
+      bitWrite(*var, right_bit+2, 1);
+      break;
+    case 5: // nbits == 3
+      bitWrite(*var, right_bit, 1);
+      bitWrite(*var, right_bit+1, 0);
+      bitWrite(*var, right_bit+2, 1);
+      break;
+    case 6: // nbits == 3
+      bitWrite(*var, right_bit, 0);
+      bitWrite(*var, right_bit+1, 1);
+      bitWrite(*var, right_bit+2, 1);
+      break;
+    case 7: // nbits == 3
+      bitWrite(*var, right_bit, 1);
+      bitWrite(*var, right_bit+1, 1);
+      bitWrite(*var, right_bit+2, 1);
+      break;
+  }
+}
+
+
+void handle_failed_shipment() {
 
   /* The reason why a shipment could fail is either
    * we've got to the maximum of messages in one day
    * or to the established top for shipment retries */
 
-  // save payload on rec_buff on triggering emergency (Triggering emergency payload). Save limit vars??
-/* Developing
- * if (reason_payload)
-     for (byte i=0; i<SHIPMENT_BUFFER_SIZE; i++)
-       rec_buff[i] = send_buff[i];
-*/
+  if (bitRead(send_buff[0], 6)) {  // Read ereason bit from send_buff[]
 
-  handle_samples();
+    unsigned long tstamp;
+
+    /* Saving Triggering emergency payload... */
+
+    for (int i=0; i<(SHIPMENT_BUFFER_SIZE - 4); i++)
+      rec_matrix[rec_matrix_index][i] = send_buff[i];
+
+    // Next setting is possible given the current message type order
+    bitSet(rec_matrix[rec_matrix_index][0], 3); // Set message type == REC_X_MSG.
+
+    // Set payload format indicator bits to 7
+    bitWrite(rec_matrix[rec_matrix_index][1], 5, 1);
+    bitWrite(rec_matrix[rec_matrix_index][2], 2, 1);
+    bitWrite(rec_matrix[rec_matrix_index][4], 7, 1);
+
+    tstamp = millis();
+    write_rec_tstamp(&tstamp);
+
+    if (++rec_matrix_index == MAX_RECOVERY_MSG)
+      rec_matrix_index = 0;
+    if (rec_matrix_counter < MAX_RECOVERY_MSG)
+      rec_matrix_counter++;
+  }
+
   reset_measures();
   reset_buff(send_buff);
   resched_ship_pol(0);
@@ -598,32 +703,34 @@ void handle_failed_shipment() {
 
 
 void check_retry() {
-  byte reason_payload = 0;  //DEVELOPING. SET TO ZERO FOR COMPILATION // Payload already computed. Get this field from send_buff[].
   if (ship_attempt == MAX_SHIPMENT_RETRIES)
     handle_failed_shipment();
   else {
     reset_buff(send_buff);
-    sched_shipment(SHIPMENT_RETRY, reason_payload);
+    sched_shipment(SHIPMENT_RETRY, bitRead(send_buff[0], 6));
   }
 }
 
 // Simulate shipment
-int mock_sigfox_call() {
+int mock_sigfox_call(byte arr[]) {
   // simulate that it takes about 4 sec to send a message
   delay(4000);
-  return random(0,99);
+  return random(100);
 }
 
-void send_measurements(byte reason_payload) {
+void send_measurements(byte ereason_payload) {
 
   static float temp;
-  static unsigned long delay;
+  static unsigned long tstamp, temp_tstamp = 0;
   byte msg_type = REPORT_MSG;
+  unsigned int max_value = 0;
+  int max_range_ids[3] = {-1,-1,-1};
+  byte payload_format, numerator, match, match_count, counter = 0;
 
   if (ship_attempt++==0) {
     byte i=0;
 
-    delay = millis();
+    tstamp = millis();
     while (temp_err) {
       if (++i==2) {
         temp = TEMP_READING_ERR; // Set temp value to TEMP_READING_ERR to indicate failure
@@ -636,6 +743,7 @@ void send_measurements(byte reason_payload) {
     if (!temp_err) {
       tempSensor.begin();
       temp = tempSensor.getTemperature();
+      temp_tstamp = millis();
       tempSensor.shutdown();
 
       if (check_upper_limit(temp)) {
@@ -674,20 +782,213 @@ void send_measurements(byte reason_payload) {
     }
   }
 
+  /* Calculate payload format variant (type of payload) */
+
+  if (msg_type == LIMITS_MSG || msg_type == ALARM_LIMITS_MSG) {  // payload format variants == 0/1/2
+
+    unsigned int bpm_limits_counter = limits_exceeded[0] + limits_exceeded[1];
+
+    if (bpm_limits_counter != 0) {
+      if (bpm_limits_counter < limits_exceeded_counter) // bpm and temperature limits exceeded on the interval
+        payload_format = 0;
+      else // bpm_limits_counter == limits_exceeded_counter (only bpm measure has been exceeded)
+        payload_format = 1;
+    }
+    else while ((payload_format = random(3))==1); // only temperature limit exceeded (variants == 0/2)
+  }
+  else {
+    if (msg_type == REPORT_MSG || msg_type == ALARM_MSG) {
+      if ((temp_tstamp != 0) && ((millis() - temp_tstamp) < TEMP_MEASURING_DELAY))
+        while ((payload_format = random(1, 4))==2); // payload format variants == 1/3
+      else 
+        payload_format = random(4); // payload format variants == 0/1/2/3
+    }
+    else  { // msg_type == ERROR_MSG
+      if (pulsesensor_err) payload_format = 4;
+      else
+        payload_format = random(5, 7); // payload format variants == 5/6
+    }
+  }
+
+
+  /* Configuring payload... */
+
+  /* Setting payload format indicator bits... */
+
+  bitWrite(send_buff[1], 5, bitRead(payload_format, 2));
+  bitWrite(send_buff[2], 2, bitRead(payload_format, 1));
+  bitWrite(send_buff[4], 7, bitRead(payload_format, 0));
+
+
+  /* Setting first 7 bits of the payload...*/
+  
+  bitWrite(send_buff[0], 7, emergency_active()); // emergency field
+  bitWrite(send_buff[0], 6, ereason_payload); // emergency reason payload field
+
+  // Shipment policy field
+  if (epol_active()) write_dec_to_bin(&(send_buff[0]), 1, 5, 2);
+  else {
+    if (rpol_active()) write_dec_to_bin(&(send_buff[0]), 2, 5, 2);
+    else // Regular shipment rate
+      write_dec_to_bin(&(send_buff[0]), 0, 5, 2);
+  }
+
+  switch (msg_type) {  // Message type field setting
+    case ALARM_MSG:
+      write_dec_to_bin(&(send_buff[0]), 0, 3, 3);
+      break;
+    case LIMITS_MSG:
+      write_dec_to_bin(&(send_buff[0]), 1, 3, 3);
+      break;
+    case ALARM_LIMITS_MSG:
+      write_dec_to_bin(&(send_buff[0]), 2, 3, 3);
+      break;
+    case ERROR_MSG:
+      write_dec_to_bin(&(send_buff[0]), 3, 3, 3);
+      break;
+    case REPORT_MSG:
+      write_dec_to_bin(&(send_buff[0]), 7, 3, 3);
+      break;
+  }
+
+
+  /* Computing measurements... */
 
   if (bpm_ibi_sample_counter==0) // More secure than reading pulsesensor_err. (Division by 0 on avg_bpm computing)
-    // avoid computing bpm. Configure payload accordinly (BPM field set to BPM_READING_ERR).
+    avg_bpm = BPM_READING_ERR;   // avoid computing bpm fields
+  else {
+    avg_bpm = (byte)round(sum_bpm/bpm_ibi_sample_counter);
+    avg_ibi = round(sum_ibi/bpm_ibi_sample_counter);
 
-  // compute measurements
-  // reason_payload{1:reason of emergency; 0: not the reason}
-  // configure payload (based on msg_type and reason_payload and policies && emergency_active()) on send_buff
-  // in case of LIMITS_MSG||ALARM_LIMITS_MSG send also limits_exceeded[] values
+    match = 0; match_count = 0;
+    while (counter!=3) {  // We want to save the indexes of the three highest values of ranges[] on max_range_ids[]
+      byte skipped = 0;
 
+      for (int i=0; i<(sizeof(ranges)); i++) {
+        if (counter != 0) {
+          if (match==0) {
+            for (int j=0; j<counter; j++) {
+              if (i==max_range_ids[j]) {
+                match = 1; match_count++;
+                break;
+              }
+            }
+          }
+          if (!skipped && match) { // counter != 0
+            if (counter==1) skipped = 1;
+            else // counter==2
+              if (match_count < 2) match = 0;
+              else skipped = 1;
+            continue;
+          }
+        }
+        if (ranges[i] > max_value) {
+          max_value = ranges[i];
+          max_range_ids[counter] = i;
+        }
+      }
+      match = 0; match_count = 0; skipped = 0;
+      max_value = 0; counter++;
+    }
+
+
+    /* Set range identifier bits */
+
+    bitWrite(send_buff[0], 0, ((max_range_ids[0] >= 4) && (max_range_ids[0] <= 5)));
+
+    if ((max_range_ids[0] >= 0) && (max_range_ids[0] <= 3))
+      write_dec_to_bin(&(send_buff[1]), max_range_ids[0], 7, 2);
+    else {
+      if (max_range_ids[0]==4)
+        write_dec_to_bin(&(send_buff[1]), 0, 7, 2);
+      else // max_range_ids[0] == 5
+        write_dec_to_bin(&(send_buff[1]), 1, 7, 2);
+    }
+
+    write_dec_to_bin(&(send_buff[2]), max_range_ids[1], 5, 3);
+    write_dec_to_bin(&(send_buff[3]), max_range_ids[2], 2, 3);
+
+
+    /* Calculate and set percentages */
+
+    for (int i=0, j; i<sizeof(max_range_ids); i++) {
+      j = max_range_ids[i];
+      max_range_ids[i] = round((ranges[j]/bpm_ibi_sample_counter)*(float)100); // Reuse max_range_ids[] to save numerators
+    }
+
+    numerator = (byte)max_range_ids[0];
+    for (int i=4; i>=0; i--)
+      bitWrite(send_buff[1], i, bitRead(numerator, i+2));
+    bitWrite(send_buff[2], 7, bitRead(numerator, 1));
+    bitWrite(send_buff[2], 6, bitRead(numerator, 0));
+
+    numerator = (byte)max_range_ids[1];
+    bitWrite(send_buff[2], 1, bitRead(numerator, 6));
+    bitWrite(send_buff[2], 0, bitRead(numerator, 5));
+    for (int i=7; i>=3; i--)
+      bitWrite(send_buff[3], i, bitRead(numerator, i-3));
+
+    numerator = (byte)max_range_ids[2];
+    for (int i=6; i>=0; i--)
+      bitWrite(send_buff[4], i, bitRead(numerator, i));
+  }
+
+  /* First 5 bytes of send_buff [0-4] written at this point. Writing from send_buff[5] onwards */
+
+  send_buff[5] = avg_bpm;
+
+  // Write max_bpm and min_bpm on corresponding payloads
+  if (payload_format==0 || payload_format==1 || payload_format==5) {
+    send_buff[6] = max_bpm;
+    send_buff[7] = min_bpm;
+  }
+
+  // Write temp on corresponding payloads
+  if (payload_format==0 || payload_format==2 || payload_format==4) {
+    byte init_pos, end_pos;
+    byte *p = (byte *)&temp;
+    
+    if (payload_format==4) {  // Write temp on bytes [6-9]. 10 byte packet !!
+      end_pos = SHIPMENT_BUFFER_SIZE - 3;
+      init_pos = SHIPMENT_BUFFER_SIZE - 6;
+    }
+    else  {  // Write temp on bytes [8-11]
+      end_pos = SHIPMENT_BUFFER_SIZE - 1;
+      init_pos = SHIPMENT_BUFFER_SIZE - 4;
+    }
+    for (int i=init_pos, j=(sizeof(temp)-1); i<=end_pos, j>=0; i++, j--)
+      send_buff[i] = p[j]; // Little endian arch
+  }
+
+  // Write max_ibi and min_ibi on corresponding payloads
+  if (payload_format==1 || payload_format==3 || payload_format==5 || payload_format==6) {
+
+    byte *p = (byte *)&max_ibi; // Write max_ibi on bytes [8-9]
+    for (int i=(SHIPMENT_BUFFER_SIZE-4), j=(sizeof(max_ibi)-3); i<(SHIPMENT_BUFFER_SIZE-2), j>=0; i++, j--)
+      send_buff[i] = p[j]; // Little endian arch
+
+    p = (byte *)&min_ibi;  // Write min_ibi on bytes [10-11]
+    for (int i=(SHIPMENT_BUFFER_SIZE-2), j=(sizeof(min_ibi)-3); i<SHIPMENT_BUFFER_SIZE, j>=0; i++, j--)
+      send_buff[i] = p[j]; // Little endian arch
+  }
+
+  // Write avg_ibi on corresponding payloads
+  if (payload_format==2 || payload_format==3 || payload_format==6) {
+    byte *p = (byte *)&avg_ibi; // Write avg_ibi on bytes [6-7]
+    for (int i=(SHIPMENT_BUFFER_SIZE-6), j=(sizeof(avg_ibi)-3); i<=(SHIPMENT_BUFFER_SIZE-5), j>=0; i++, j--)
+      send_buff[i] = p[j]; // Little endian arch
+  }
+
+
+  /* Payload configured on send_buff */
+
+  // We can't delay the knowledge of msg value (Call to Sigfox Backend with DOWNLINK_MSG)
+  if (!downlink_done)
+    // DOWNLINK_MSG. Get and set parameters (msg, RTC, etc.)
 
   if (msg == MAX_UPLINK_MSGS) {
     // sleep/continue sampling ??
-    /* Payload already computed on send_buff */
-    handle_failed_shipment();
+    handle_failed_shipment();  // Payload already computed on send_buff
     //rtc.standbyMode(); ?? // Send the board in standby mode.
     return;
   }
@@ -715,11 +1016,10 @@ void send_measurements(byte reason_payload) {
 
   /* Shipping...*/
 
-  if (mock_sigfox_call()) {
-    shipment = millis();
-    msg++;
+  if (mock_sigfox_call(send_buff)) {
+
+    shipment = millis(); msg++;
     button_pushed = 0;
-    delay = shipment - delay;
 
     if (msg_type == ALARM_MSG || msg_type == ALARM_LIMITS_MSG) {
       amsg = shipment;
@@ -732,17 +1032,54 @@ void send_measurements(byte reason_payload) {
       elim = 0;
     }
 
-  // Developing
-  /* if (rec_buff) (read_flash?) not empty, ship it here?
-   *   if (sigfox call)
-   *     reset_buff(rec_buff);
-   *   else ?
-   */
-
     reset_measures();
     reset_buff(send_buff);
-    update_flash(shipment);
-    resched_ship_pol(delay);
+
+
+    /* Pick up the last pending payload from rec_matrix[] and send it */
+
+    if ((rec_matrix_counter != 0) && (msg < MAX_UPLINK_MSGS)) {
+
+      unsigned long tstamp, aux;
+      byte *p = (byte *)&tstamp;
+
+      if (--rec_matrix_index==-1)
+        rec_matrix_index = MAX_RECOVERY_MSG - 1;
+
+      // Reading tstamp from last 4 bytes of rec_matrix[rec_matrix_index] buff
+      for (int i=(SHIPMENT_BUFFER_SIZE-1), j=0; i>=(SHIPMENT_BUFFER_SIZE-4), j<sizeof (tstamp); i--, j++)
+        p[j] = rec_matrix[rec_matrix_index][i]; // Little endian arch
+
+      aux = tstamp;
+      tstamp = millis() - tstamp;
+
+      if (tstamp <= MAX_RECOVERY_TIME) {
+        write_rec_tstamp(&tstamp);
+        if (mock_sigfox_call(rec_matrix[rec_matrix_index])) {
+          shipment = millis(); msg++;
+          reset_buff(rec_matrix[rec_matrix_index]);
+          if (--rec_matrix_counter==0)
+            rec_matrix_index = 0;
+        }
+        else { // Just progress. Retry on next scheduled shipment
+          write_rec_tstamp(&aux);
+          if (++rec_matrix_index==MAX_RECOVERY_MSG)
+            rec_matrix_index = 0;
+        }
+      }
+      else { // liberate rec_matrix. All buffers on rec_matrix are old records (> MAX_RECOVERY_TIME)
+        for (int i=rec_matrix_counter; i>0; i--) {
+          reset_buff(rec_matrix[rec_matrix_index]);
+          if (--rec_matrix_index==-1)
+            rec_matrix_index = MAX_RECOVERY_MSG - 1;
+        }
+        rec_matrix_counter = 0;
+        rec_matrix_index = 0;
+      }
+    }
+
+//  update_flash(shipment);
+    resched_ship_pol(millis() - tstamp);
     ship_attempt = 0;
   }
   else check_retry();
@@ -758,16 +1095,16 @@ void set_timer(byte timer, unsigned long ms, void *args) {
   switch (timer) {
     case SHIPMENT_TIMER:
       // Reset timer, first of all. Pending?
-      // if (ms==0) send_measurements(reason_payload)??? directamente, sin timer. ??
-      // timer::set(ms, send_measurements(reason_payload));
+      // if (ms==0) send_measurements(ereason_payload)??? directamente, sin timer. ??
+      // timer::set(ms, send_measurements(ereason_payload));
       // timer::start();
       break;
   }
 }
 */
 
-void sched_shipment(unsigned long ms, byte reason_payload) {
-  //set_timer(timer, ms, reason_payload);
+void sched_shipment(unsigned long ms, byte ereason_payload) {
+  //set_timer(timer, ms, ereason_payload);
 }
 
 
@@ -936,6 +1273,8 @@ void handle_button_pushed() {
 }
 
 
+
+
 /* Interrupt Service Routine button_pressed(),
  * triggered whenever the user pushes the emergency button */
 void button_pressed() {
@@ -1090,27 +1429,32 @@ void loop() {
     }
     button_flag = 0;
   }
-  
-  /*
-     See if a sample is ready from the PulseSensor.
+
+  /* See if a sample is ready from the PulseSensor.
      If USE_INTERRUPTS is false, this call to sawNewSample()
      will, if enough time has passed, read and process a
-     sample (analog voltage) from the PulseSensor.
-  */
-  
+     sample (analog voltage) from the PulseSensor. */
 
   if (!pulsesensor_err && pulseSensor.sawNewSample()) {
-    // reduce sampling (32kb SRAM) The largest sampling interval will be one defined in rec_seqs
+    // reduce sampling? (32kb SRAM) The largest sampling interval will be one defined in rec_seqs
     bpm = bytecast(pulseSensor.getBeatsPerMinute());
     ibi = pulseSensor.getInterBeatIntervalMs();
-    /* proteger bpm_ibi_sample_counter? ; enviar bpm_ibi_sample_counter en el payload?
-    bpm_hist[bpm_ibi_sample_counter] = bpm;
-    ibi_hist[bpm_ibi_sample_counter] = ibi;
+    sum_bpm += bpm;
+    sum_ibi += ibi;
     bpm_ibi_sample_counter++; // count bpm and ibi readings
-    */
     set_max_and_min(bpm, ibi);
 
-  // check limits
+    if (bpm<50) ranges[0]++;
+    else if (bpm>=50 && bpm <=75) ranges[1]++;
+         else if (bpm>75 && bpm <=105) ranges[2]++;
+              else if (bpm>105 && bpm <=130) ranges[3]++;
+                   else ranges[4]++; // bpm > 130
+
+    /* proteger bpm_ibi_sample_counter?
+     * bpm_hist[bpm_ibi_sample_counter] = bpm;
+     * ibi_hist[bpm_ibi_sample_counter] = ibi; */
+
+    // check limits
     if (check_upper_limit(bpm)) {
       // ship_timer.pause();
       limit_exceeded(UPPER_BPM_MEASURE, bpm);
