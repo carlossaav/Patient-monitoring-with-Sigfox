@@ -11,16 +11,16 @@
 #define SENSORS_LED 7          // Blinks with every heartbeat
 #define EMERGENCY_LED 8        // Used on emergencies
 #define SIGFOX_LED LED_BUILTIN
-#define NOISE_PIN 4
+#define NOISE_PIN 4            // Provide a random input with analogRead() on this pin for the random number generator
 
 #define PULSE_THRESHOLD 2140   // Determine which Signal to "count as a beat" and which to ignore
 
 #define UPPER_BPM_MEASURE 0
 #define UPPER_BPM_LIMIT 125
-#define UPPER_BPM_ELIMIT 150
+#define UPPER_BPM_ELIMIT 145
 #define LOWER_BPM_MEASURE 1
-#define LOWER_BPM_LIMIT 60
-#define LOWER_BPM_ELIMIT 50
+#define LOWER_BPM_LIMIT 70
+#define LOWER_BPM_ELIMIT 60
 
 #define UPPER_TEMP_MEASURE 2
 #define UPPER_TEMP_LIMIT 37.5
@@ -36,11 +36,6 @@
 #define LOWER_IBI_ELIMIT 250
 */
 
-
-/* 32 KB SRAM
-#define MAX_BPM_SAMPLES 600
-#define MAX_IBI_SAMPLES 600
-*/
 
 #define RECEIVING_BUFFER_SIZE 8
 #define SHIPMENT_BUFFER_SIZE 12
@@ -61,7 +56,9 @@
 #define NEW_EMERG_DELAY 1200000 // 20 min
 
 // Limits exceeded counter threshold to activate Emergency shipment's policy
-#define LIM_COUNT_EPOL_TRIGGERING 10
+#define LIM_COUNT_EPOL_TRIGGERING 50 // Getting this as a measure of time exceeding a limit
+
+#define BOTH_LIMITS_EXCEEDED_DELAY 60000 // Time to reach the opposite bpm limit again
 
 
 #define MAX_UPLINK_MSGS 140
@@ -105,18 +102,16 @@
 #define REC_NON_CRITIC_ESEQ_DURATION
 */
 
-#define MAX_RECOVERY_MSG 30 // IMPORTANT, NOT SET THIS VALUE HIGHER THAN 255.
+#define MAX_RECOVERY_MSG 30 // IMPORTANT, DO NOT SET THIS VALUE HIGHER THAN 255.
 #define MAX_RECOVERY_TIME 21600000 // 6 hours
+
+
 /** Variables **/
 
-struct msg_format {
-};
-
 // Measurements
-byte avg_bpm, max_bpm, min_bpm;
+byte max_bpm, min_bpm, avg_bpm;
 unsigned int max_ibi, min_ibi, avg_ibi;
 unsigned int sum_bpm, sum_ibi;
-// float sd_bpm, sd_ibi;
 
 
 /* To later process where bpm readings have been falling across the interval, 
@@ -127,11 +122,8 @@ unsigned int sum_bpm, sum_ibi;
  * ranges[3] stores reading counts between 106-130 bpm
  * ranges[4] stores reading counts higher than 130 bpm
  */
-byte ranges[6] = {0,0,0,0,0,0};
+int ranges[5] = {0,0,0,0,0};
 
-// Sampling buffers
-// byte bpm_hist[MAX_BPM_SAMPLES];
-// int ibi_hist[MAX_IBI_SAMPLES]; // evaluate data type
 
 // Buffers for sending and receiving
 byte recv_buff[RECEIVING_BUFFER_SIZE];
@@ -145,17 +137,20 @@ byte rec_matrix_index = 0;
 byte rec_matrix_counter = 0;
 byte rec_matrix[MAX_RECOVERY_MSG][SHIPMENT_BUFFER_SIZE];
 
-/*
-  For upper and lower bpm limits, limits_exceeded stores how many
-  times those limits have been exceeded.
-  - limits_exceeded[0][1] for upper and lower bpm limit counts
-*/
-long limits_exceeded[2];
+
+struct bpm_limit {
+  unsigned long counter;  // Counter of times the measure (high or low bpm limit) has been exceeded
+  unsigned long tstamp;   // timestamp of last limit exceeded
+};
+
+
+/* bpm_limits[0][1] for upper and lower bpm measurements */
+struct bpm_limit bpm_limits[2];
 
 // Counters
 int msg;   // sent messages
-int bpm_ibi_sample_counter;
-long limits_exceeded_counter;
+unsigned int bpm_ibi_sample_counter;
+unsigned long limits_exceeded_counter;
 
 // int max_downlink_msgs;
 
@@ -262,11 +257,12 @@ void setup() {
   pinMode(SENSORS_LED, OUTPUT);
   pinMode(EMERGENCY_LED, OUTPUT);
 
-  digitalWrite(EMERGENCY_LED, LOW);
   digitalWrite(SIGFOX_LED, LOW);
+  digitalWrite(SENSORS_LED, LOW);
+  digitalWrite(EMERGENCY_LED, LOW);
 
   attachInterrupt(digitalPinToInterrupt(INPUT_BUTTON_PIN), button_pressed, FALLING);
-  // read from flash?
+
   msg = 0;
   shipment = 0;
   acc_delay = 0;
@@ -285,6 +281,7 @@ void setup() {
     reset_buff(rec_matrix[i]);
 
   /* Checking  Sigfox Module... */
+  SigFox.noDebug();
   sigfox_check();
   if (!sigfox_err) {
     // device_id = SigFox.ID().toInt();
@@ -292,7 +289,6 @@ void setup() {
     // blink_on_pulse = ; time = ; etc.
     SigFox.end(); // Send the module to sleep
     // All the power saving features are enabled.
-    //SigFox.noDebug(); default?
   }
   else {
     // implement behaviour
@@ -445,21 +441,6 @@ int init_sigfox_module() {
 }
 
 
-/*
- * Attributes on flash:
- *   - maximum uplink messages per day included on data plan (max_uplink_msgs)
- *  // - maximum downlink messages per day included on data plan (max_downlink_msgs)
- *   - sent messages counter (msg)
- *   - accumulated shipment delay (acc_delay)
- *   - last shipment timestamp (shipment)
- *   - last Emergency shipment's policy activation timestamp (epol_act)
- *   - last Emergency shipment's policy deactivation timestamp (epol_deact)
-*/
-
-void update_flash(unsigned long shipment) {
-}
-
-
 void reset_measures() {
 
   /* Initialize these vars to unlikely (impossible) values */
@@ -467,23 +448,19 @@ void reset_measures() {
   min_bpm = 255;
   avg_bpm = 0;
   sum_bpm = 0;
-  //  sd_bpm = -1.0;
 
   max_ibi = 0;
   min_ibi = 10000;
   avg_ibi = 0;
   sum_ibi = 0;
-  //  sd_ibi = -1.0;
 
-/* reset sampling buffers for a new sampling interval
-  reset bpm_hist[];
-  reset ibi_hist[]; */
-
-  for (int i=0; i<(sizeof(ranges)); i++)
+  for (int i=0; i<(sizeof(ranges) / sizeof(ranges[0])); i++)
     ranges[i] = 0;
 
-  for (int i=0; i<(sizeof(limits_exceeded)); i++)
-    limits_exceeded[i] = 0;
+  for (int i=0; i<(sizeof(bpm_limits) / sizeof(bpm_limits[0])); i++) {
+    bpm_limits[i].counter = 0;
+    bpm_limits[i].tstamp = 0;
+  }
 
   bpm_ibi_sample_counter = 0;
   limits_exceeded_counter = 0;
@@ -557,7 +534,7 @@ void resched_ship_pol(unsigned long delay) {
       }
     }
 
-    if (*index == sizeof seq) {
+    if (*index == (sizeof(seq) / sizeof(seq[0]))) {
       deact_emergency();
       deact_epol();
       if (acc_delay>0)
@@ -586,7 +563,7 @@ void resched_ship_pol(unsigned long delay) {
         index = &rec_non_critic_eseq_index;
       }
       sched_shipment(check_interval(seq[*index] - delay), 0);
-      if (++(*index) == sizeof seq)
+      if (++(*index) == (sizeof(seq) / sizeof(seq[0])))
         *index = 0;
     }
   }
@@ -723,9 +700,7 @@ void send_measurements(byte ereason_payload) {
   static float temp;
   static unsigned long tstamp, temp_tstamp = 0;
   byte msg_type = REPORT_MSG;
-  unsigned int max_value = 0;
-  int max_range_ids[3] = {-1,-1,-1};
-  byte payload_format, numerator, match, match_count, counter = 0;
+  byte payload_format;
 
   if (ship_attempt++==0) {
     byte i=0;
@@ -766,8 +741,8 @@ void send_measurements(byte ereason_payload) {
 
   if (limits_exceeded_counter) { // msg_type == REPORT_MSG/ERROR_MSG
     if (msg_type==ERROR_MSG) {
-      if (limits_exceeded[0] || limits_exceeded[1])
-        msg_type = LIMITS_MSG; // if any of bpm limits exceeded, prioritize LIMITS_MSG
+      if (bpm_limits[0].counter || bpm_limits[1].counter)
+        msg_type = LIMITS_MSG; // if any of bpm limits was exceeded, prioritize LIMITS_MSG
     }
     else msg_type = LIMITS_MSG;
   }
@@ -782,11 +757,11 @@ void send_measurements(byte ereason_payload) {
     }
   }
 
-  /* Calculate payload format variant (type of payload) */
+  /* Calculate payload format indicator (type of payload) */
 
   if (msg_type == LIMITS_MSG || msg_type == ALARM_LIMITS_MSG) {  // payload format variants == 0/1/2
 
-    unsigned int bpm_limits_counter = limits_exceeded[0] + limits_exceeded[1];
+    unsigned int bpm_limits_counter = bpm_limits[0].counter + bpm_limits[1].counter;
 
     if (bpm_limits_counter != 0) {
       if (bpm_limits_counter < limits_exceeded_counter) // bpm and temperature limits exceeded on the interval
@@ -857,14 +832,18 @@ void send_measurements(byte ereason_payload) {
   if (bpm_ibi_sample_counter==0) // More secure than reading pulsesensor_err. (Division by 0 on avg_bpm computing)
     avg_bpm = BPM_READING_ERR;   // avoid computing bpm fields
   else {
-    avg_bpm = (byte)round(sum_bpm/bpm_ibi_sample_counter);
-    avg_ibi = round(sum_ibi/bpm_ibi_sample_counter);
+    int max_value = -1;
+    int max_range_ids[3] = {-1,-1,-1};
+    byte numerator, match, match_count, counter = 0;
+
+    avg_bpm = (byte)round((float)sum_bpm/(float)bpm_ibi_sample_counter);
+    avg_ibi = round((float)sum_ibi/(float)bpm_ibi_sample_counter);
 
     match = 0; match_count = 0;
     while (counter!=3) {  // We want to save the indexes of the three highest values of ranges[] on max_range_ids[]
       byte skipped = 0;
 
-      for (int i=0; i<(sizeof(ranges)); i++) {
+      for (int i=0; i<(sizeof(ranges) / sizeof(ranges[0])); i++) {
         if (counter != 0) {
           if (match==0) {
             for (int j=0; j<counter; j++) {
@@ -888,32 +867,23 @@ void send_measurements(byte ereason_payload) {
         }
       }
       match = 0; match_count = 0; skipped = 0;
-      max_value = 0; counter++;
+      max_value = -1; counter++;
     }
 
 
     /* Set range identifier bits */
 
-    bitWrite(send_buff[0], 0, ((max_range_ids[0] >= 4) && (max_range_ids[0] <= 5)));
-
-    if ((max_range_ids[0] >= 0) && (max_range_ids[0] <= 3))
-      write_dec_to_bin(&(send_buff[1]), max_range_ids[0], 7, 2);
-    else {
-      if (max_range_ids[0]==4)
-        write_dec_to_bin(&(send_buff[1]), 0, 7, 2);
-      else // max_range_ids[0] == 5
-        write_dec_to_bin(&(send_buff[1]), 1, 7, 2);
-    }
-
-    write_dec_to_bin(&(send_buff[2]), max_range_ids[1], 5, 3);
-    write_dec_to_bin(&(send_buff[3]), max_range_ids[2], 2, 3);
+    bitWrite(send_buff[0], 0, (max_range_ids[0] >= 4));
+    write_dec_to_bin(&(send_buff[1]), (byte)(max_range_ids[0] % 4), 7, 2); // First range id setting
+    write_dec_to_bin(&(send_buff[2]), (byte)max_range_ids[1], 5, 3); // Second range id setting
+    write_dec_to_bin(&(send_buff[3]), (byte)max_range_ids[2], 2, 3); // Third range id setting
 
 
     /* Calculate and set percentages */
 
-    for (int i=0, j; i<sizeof(max_range_ids); i++) {
+    for (int i=0, j; i<(sizeof(max_range_ids) / sizeof(max_range_ids[0])); i++) {
       j = max_range_ids[i];
-      max_range_ids[i] = round((ranges[j]/bpm_ibi_sample_counter)*(float)100); // Reuse max_range_ids[] to save numerators
+      max_range_ids[i] = round(((float)ranges[j]/(float)bpm_ibi_sample_counter)*100.0);  // Reuse max_range_ids[] to save numerators
     }
 
     numerator = (byte)max_range_ids[0];
@@ -947,7 +917,7 @@ void send_measurements(byte ereason_payload) {
   if (payload_format==0 || payload_format==2 || payload_format==4) {
     byte init_pos, end_pos;
     byte *p = (byte *)&temp;
-    
+
     if (payload_format==4) {  // Write temp on bytes [6-9]. 10 byte packet !!
       end_pos = SHIPMENT_BUFFER_SIZE - 3;
       init_pos = SHIPMENT_BUFFER_SIZE - 6;
@@ -1078,7 +1048,6 @@ void send_measurements(byte ereason_payload) {
       }
     }
 
-//  update_flash(shipment);
     resched_ship_pol(millis() - tstamp);
     ship_attempt = 0;
   }
@@ -1239,7 +1208,7 @@ void admin_shipping(byte alarm) {
             new_emergency = 1;
           }
           else {
-            if (critic_eseq_index > ((sizeof critic_eseq)/2)) {
+            if (critic_eseq_index > ((sizeof(critic_eseq) / sizeof(critic_eseq[0])) / 2)) {
               // It's worth giving up critic_eseq
               critic_eseq_index = 0;
               new_emergency = 0;
@@ -1309,7 +1278,7 @@ byte check_elimits(byte measure, byte value) {
 // call ship_timer.resume() wherever you don't call send_measurements()
 void limit_exceeded(byte measure, byte value) {
 
-  byte both_exceeded, i;
+  byte both_exceeded, aux, i;
 
   limits_exceeded_counter++;
   switch (measure) {
@@ -1323,7 +1292,8 @@ void limit_exceeded(byte measure, byte value) {
       return; // Do not continue, just count the temp limit exceeded
   }
 
-  limits_exceeded[i]++;
+  bpm_limits[i].counter++;
+  bpm_limits[i].tstamp = millis();
 
   if (check_elimits(measure, value)) {
 
@@ -1341,25 +1311,30 @@ void limit_exceeded(byte measure, byte value) {
   if (epol_active() || rpol_active())
     return;
 
-  // No policies active at this point
+  /* No policies active at this point */
+
+  aux = i;
   if (measure==UPPER_BPM_MEASURE)
-    both_exceeded = limits_exceeded[i+1];
+    if ((both_exceeded = bpm_limits[++i].counter)==0) i--;
   else // LOWER_BPM_MEASURE
-    both_exceeded = limits_exceeded[i-1];
+    if ((both_exceeded = bpm_limits[--i].counter)==0) i++;
 
   if (both_exceeded) {
-    // maxs and mins of the same measure violated, trigger emergency
-    if (fire_epol(0)) {
-      act_emergency(); // do it here?
-      sched_shipment(0, 1);
+    // max and min limits of bpm violated, trigger emergency
+    if ((millis() - bpm_limits[i].tstamp) <= BOTH_LIMITS_EXCEEDED_DELAY) {
+      if (fire_epol(0)) {
+        act_emergency(); // do it here?
+        sched_shipment(0, 1);
+      }
+      else {
+        // implement behaviour
+      }
+      return; // If fire_epol() fails, chances of firing epol on next if block won't change too much.
     }
-    else {
-      // implement behaviour
-    }
-    return;
+    i = aux; // Restore index
   }
 
-  if (limits_exceeded_counter > LIM_COUNT_EPOL_TRIGGERING) {
+  if (bpm_limits[i].counter > LIM_COUNT_EPOL_TRIGGERING) {
   /* Limits exceeded too many times.
    * Activate emergency shipment's policy. */
     if (fire_epol(0)) {
@@ -1441,18 +1416,14 @@ void loop() {
     ibi = pulseSensor.getInterBeatIntervalMs();
     sum_bpm += bpm;
     sum_ibi += ibi;
-    bpm_ibi_sample_counter++; // count bpm and ibi readings
+    bpm_ibi_sample_counter++; // count bpm and ibi readings. Protect var? (concurrency issues)
     set_max_and_min(bpm, ibi);
 
     if (bpm<50) ranges[0]++;
     else if (bpm>=50 && bpm <=75) ranges[1]++;
-         else if (bpm>75 && bpm <=105) ranges[2]++;
-              else if (bpm>105 && bpm <=130) ranges[3]++;
-                   else ranges[4]++; // bpm > 130
-
-    /* proteger bpm_ibi_sample_counter?
-     * bpm_hist[bpm_ibi_sample_counter] = bpm;
-     * ibi_hist[bpm_ibi_sample_counter] = ibi; */
+    else if (bpm>75 && bpm <=105) ranges[2]++;
+    else if (bpm>105 && bpm <=130) ranges[3]++;
+    else ranges[4]++; // bpm > 130
 
     // check limits
     if (check_upper_limit(bpm)) {

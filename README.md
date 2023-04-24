@@ -1,5 +1,6 @@
-
 # Patient's heart rate and temperature monitoring system on ARDUINO MKRFOX1200
+
+![ARDUINO MKRFOX1200](doc/images/cover.jpg)
 
 This project aims to be a monitoring system for aged people based on the ARDUINO MKRFOX1200 board and a couple of sensors atached to it that will monitor heart rate and temperature body measurements. The board will ship a set of metrics based on data recorded by these sensors throug Sigfox's network, which is accesible through its library for this board and an already included data plan. Data will be gathered, buffered and processed on our Monitoring Service, which, in turn, will make them available to the medical team and related people through a web interface. Our Monitoring Service will implement some additional functionalities like notifying an emergency condition to the predefined telephone numbers via Whatssap or SMS systems.
 
@@ -13,9 +14,9 @@ We provide two sketches. One is the main program [monitor.ino](https://github.co
 
 We'll make use of a couple of sensors to achieve our monitoring goals:
 
-1. The first one is our heart rate sensor, named [PulseSensor] (https://github.com/WorldFamousElectronics/PulseSensorPlayground) by its developers, which provide a library that we'll include in our sketches to get measurements like Beats Per Minute (bpm) and InterBeat Interval (ibi), for example.
+1. The first one is our heart rate sensor, named [PulseSensor](https://github.com/WorldFamousElectronics/PulseSensorPlayground) by its developers, which provide a library that we'll include in our sketches to get measurements like Beats Per Minute (bpm) and InterBeat Interval (ibi), for example.
 
-2. The second one is the [Protocentral MAX30205] (https://github.com/Protocentral/Protocentral_MAX30205) digital temperature sensor, which also provides a library to make human body temperature measurements available in our sketches.
+2. The second one is the [Protocentral MAX30205](https://github.com/Protocentral/Protocentral_MAX30205) digital temperature sensor, which also provides a library to make human body temperature measurements available in our sketches.
 
 
 Lastly, we'll connect a couple of LEDS to our Arduino Board:
@@ -39,12 +40,12 @@ Nonetheless, we'll put a simple schema here on how conenting the pins, given tha
 
 **PulseSensor**
 
-- Connect analog pin A0 (or any other analog pin) to signal's sensor wire
+- Connect analog pin A0 (or any other analog pin) to sensor's signal wire
 - Connect VCC (3.3V) from Arduino to VDD of PulseSensor*
 - Connect GND pin to GND PulseSensor's wire.
 
 
-**This is an important step, since maximum output voltage (hence maximum input voltage on A0) from the sensor will be VDD. Having an input higher to 3.3V on any of the pins may damage the board**.
+***This is an important step, since maximum output voltage (hence maximum input voltage on A0) from the sensor will be VDD. Having an input higher to 3.3V on any of the pins may damage the board**.
 
 
 **MAX30205 Temperature Sensor**
@@ -54,8 +55,6 @@ Nonetheless, we'll put a simple schema here on how conenting the pins, given tha
 - Connect Arduino SDA to MAX30205 SDA pin.
 - Connect Arduino SCL to MAX30205 SCL pin.
 
-
-So, the whole schematic may look something like..
 
 
 ## Shipment logic
@@ -99,7 +98,7 @@ Our ArduinoMKRFOX1200 patient monitoring program will deliver messages to the Si
 - **r**: emergency reason payload (1 bit)
 - **p**: shipment policy (2 bits)
 - **m**: message type (3 bits)
-- **RP**: bpm ranges fields + payload variant (3 bytes + 9 control bits)
+- **rpv**: bpm ranges fields + payload variant (3 bytes + 9 control bits)
 - **ab**: average bpm of the interval (1 byte)
 - **maxb**: highest record of bpm variable on the interval (1 byte)
 - **minb**: lowest record of bpm variable on the interval (1 byte)
@@ -111,21 +110,21 @@ Our ArduinoMKRFOX1200 patient monitoring program will deliver messages to the Si
 
 * Payload Format Variants:
 
--  e:r:p:m:RP:ab:maxb:minb:t                                                  (**0**)
--  e:r:p:m:RP:ab:maxb:minb:maxi:mini                                          (**1**)
--  e:r:p:m:RP:ab:ai:t                                                         (**2**)
--  e:r:p:m:RP:ab:ai:maxi:mini                                                 (**3**)
--  e:r:p:m:RP:ab(-1):t (PulseSensor Error, On ERROR_MSG)                      (**4**)
--  e:r:p:m:RP:ab:maxb:minb:maxi:mini (Temperature Sensor Error, on ERROR_MSG) (**5**)
--  e:r:p:m:RP:ab:ai:maxi:mini (Temperature Sensor Error, on ERROR_MSG)        (**6**)
+-  e:r:p:m:rpv:ab:maxb:minb:t                                                  (**0**)
+-  e:r:p:m:rpv:ab:maxb:minb:maxi:mini                                          (**1**)
+-  e:r:p:m:rpv:ab:ai:t                                                         (**2**)
+-  e:r:p:m:rpv:ab:ai:maxi:mini                                                 (**3**)
+-  e:r:p:m:rpv:ab(-1):t (PulseSensor Error, On ERROR_MSG)                      (**4**)
+-  e:r:p:m:rpv:ab:maxb:minb:maxi:mini (Temperature Sensor Error, on ERROR_MSG) (**5**)
+-  e:r:p:m:rpv:ab:ai:maxi:mini (Temperature Sensor Error, on ERROR_MSG)        (**6**)
 -  (original_payload-(last 4 bytes)):x                                        (**7**)
 
 
 **Notes on control fields**
 
-- emergency bit (**e field**) set to 0 indicates there's no ongoing emergency happening at the device's end, therefore patient has not pressed the emergency button so far or at least, since last emergency. Bit set to 1 indicates the opposite.
+- emergency bit (**e field**) set to 0 indicates there's no ongoing emergency at the device's end, therefore patient has not pressed the emergency button, nor any automatic emergency condition has been detected so far or, at least, since last emergency. Bit set to 1 indicates the opposite.
 
-- Emergency reason payload (**r field**) set to 1 indicates that this payload is the original reason from the current emergency, which was triggered at the detection of any of the triggering emergency conditions.
+- Emergency reason payload (**r field**) set to 1 indicates that this payload is the original reason from the current emergency, which was triggered at the detection of any of the triggering emergency conditions (manual or automatic).
 
 - Shipment policy bits (**p field**):
 
@@ -135,13 +134,21 @@ Our ArduinoMKRFOX1200 patient monitoring program will deliver messages to the Si
 
 - Message type (**m field**): Indicates the message type of the payload.
 
-- Bpm ranges fields + Payload format variant (**RP field**): Looking to the first control bit from every value (percentage) from this field, we compound a three-bit indicator that lets the service know what kind of payload will have to process. The whole RP field looks like this, having:
+- Bpm ranges fields + Payload format variant (**rpv field**): Looking to the first control bit from every value (percentage) from this field, we compound a three-bit indicator that lets the service know what kind of payload will have to process. The whole rpv field looks like this, having:
 
-  xxx: range id bits
-  i: n-bit of the three-bit payload format indicator
-  r: positive integer numerator of the fraction r/100 (7 bits)
+  - xxx: range id bits
+  - i: n-bit of the three-bit payload format indicator
+  - r: positive integer numerator of the fraction r/100 (7 bits)
 
-  RP field: xxx:i:r:xxx:i:r:xxx:i:r
+  rpv field: xxx:i:r:xxx:i:r:xxx:i:r
 
 
-**Given that a percentage won't reach any value higher than 100, we use the the most significant bit (i) from every r value on the RP field to compound a three-bit indicator of the payload format variant**.
+  **Given that a percentage won't reach any value higher than 100, we use the the most significant bit (i) from every r value on the rpv field to compound a three-bit indicator of the payload format variant**.
+
+
+## Getting measures with [measures.ino](https://github.com/carlossaav/Patient-monitoring-with-Sigfox/blob/devel/src/test/measures/measures.ino)
+
+Hence, once you have everything setup on your board and cloned the project, you're ready to run our test sketch, [measures.ino](https://github.com/carlossaav/Patient-monitoring-with-Sigfox/blob/devel/src/test/measures/measures.ino) onto your ArduinoMKRFOX1200.
+
+This sketch is set to run about 12-13 minutes by default, making sampling rounds of 1-2 minutes, but you can change it modifying the corresponding constants at the top of the sketch. At about the end of each round, you should see something like this on your Serial Window:
+![Serial_Snapshot](doc/images/round_10.jpg)

@@ -303,7 +303,7 @@ void print_ranges(unsigned int nsamples, byte range_field) {
     if (range_field == ROUND_FIELD) rvalue = ranges[j].rcount;
     else rvalue = ranges[j].icount;
 
-    Serial.print((byte)round(((float)rvalue/(float)nsamples)*100.0)); Serial.print("%");
+    Serial.print(round(((float)rvalue/(float)nsamples)*100.0)); Serial.print("%");
     Serial.println();
   }
   Serial.println();
@@ -323,11 +323,13 @@ void handle_button_pushed() {
   if (button_pushed) {
     button_pushed = 0;
     Serial.println("Emergency deactivated.");
+    Serial.println();
     digitalWrite(EMERGENCY_LED, LOW);
     return;
   }
   button_pushed = 1;
   Serial.println("Emergency activated!");
+  Serial.println();
   digitalWrite(EMERGENCY_LED, HIGH);
 }
 
@@ -353,13 +355,13 @@ byte check_lower_limit(int ibi) {
 }
 
 
-byte bytecast(int bpm) {
-  if (bpm<0)
-    return 0;
+byte bytecast(int value) {
+  if (value<0)
+    return (byte)0;
   else
-    if (bpm>255)
-      return 255;
-  return byte(bpm);
+    if (value>255)
+      return (byte)255;
+  return byte(value);
 }
 
 
