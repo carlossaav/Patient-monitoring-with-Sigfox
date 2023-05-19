@@ -79,45 +79,45 @@ button.
 
 - **LIMITS_MSG**: Sent whenever the device records a limit exceeded.
 
-- REC_LIMITS_MSG: LIMITS_MSG recovery message.
+- **REC_LIMITS_MSG**: LIMITS_MSG recovery message.
 
 - **ALARM_MSG**: The user pressed the alarm button on the device at some point on the last sampling interval.
 
-- REC_ALARM_MSG: ALARM_MSG recovery message.
+- **REC_ALARM_MSG**: ALARM_MSG recovery message.
 
 - **ALARM_LIMITS_MSG**: On last sampling interval, the user pressed the alarm button and some exceeded limit has been detected.
 
-- REC_ALARM_LIMITS_MSG: ALARM_LIMITS_MSG recovery message.
+- **REC_ALARM_LIMITS_MSG**: ALARM_LIMITS_MSG recovery message.
 
 
-## Payload format
+## Uplink Payload Format
 
 Our ArduinoMKRFOX1200 patient monitoring program will deliver messages to the Sigfox backend following a specific format. Let's establish a terminology to make things easier:
 
-- **e**: emergency bit (1 bit)
-- **r**: emergency reason payload (1 bit)
-- **p**: shipment policy (2 bits)
-- **m**: message type (3 bits)
-- **rpv**: bpm ranges fields + payload variant (3 bytes + 9 control bits)
-- **ab**: average bpm of the interval (1 byte)
+- **e**:    emergency bit (1 bit)
+- **r**:    emergency reason payload (1 bit)
+- **p**:    shipment policy (2 bits)
+- **msg**:  message type (3 bits)
+- **rpv**:  bpm ranges fields + payload variant (3 bytes + 9 control bits)
+- **avb**:  average bpm of the interval (1 byte)
 - **maxb**: highest record of bpm variable on the interval (1 byte)
 - **minb**: lowest record of bpm variable on the interval (1 byte)
-- **ai**: average interbeat interval (ibi) of the (sampling) interval (2 bytes)
+- **avi**:  average interbeat interval (ibi) of the (sampling) interval (2 bytes)
 - **maxi**: highest record of interbeat interval (ibi) variable on the (sampling) interval (2 bytes)
 - **mini**: lowest record of interbeat interval (ibi) variable on the (sampling) interval (2 bytes)
-- **t**: temperature record of the interval (4 bytes)
-- **x**: elapsed milliseconds since the recovery message was stored (4 bytes)
+- **t**:    temperature record of the interval (4 bytes)
+- **x**:    elapsed milliseconds since the recovery message was stored (4 bytes)
 
-* Payload Format Variants:
+* Uplink Payload Format Variants (12 bytes):
 
--  e:r:p:m:rpv:ab:maxb:minb:t                                                  (**0**)
--  e:r:p:m:rpv:ab:maxb:minb:maxi:mini                                          (**1**)
--  e:r:p:m:rpv:ab:ai:t                                                         (**2**)
--  e:r:p:m:rpv:ab:ai:maxi:mini                                                 (**3**)
--  e:r:p:m:rpv:ab(-1):t (PulseSensor Error, On ERROR_MSG)                      (**4**)
--  e:r:p:m:rpv:ab:maxb:minb:maxi:mini (Temperature Sensor Error, on ERROR_MSG) (**5**)
--  e:r:p:m:rpv:ab:ai:maxi:mini (Temperature Sensor Error, on ERROR_MSG)        (**6**)
--  (original_payload-(last 4 bytes)):x                                        (**7**)
+-  e:r:p:msg:rpv:avb:maxb:minb:t                                                   (**0**)
+-  e:r:p:msg:rpv:avb:maxb:minb:maxi:mini                                           (**1**)
+-  e:r:p:msg:rpv:avb:avi:t                                                         (**2**)
+-  e:r:p:msg:rpv:avb:avi:maxi:mini                                                 (**3**)
+-  e:r:p:msg:rpv:avb(-1):t (PulseSensor Error, On ERROR_MSG)                       (**4**)
+-  e:r:p:msg:rpv:avb:maxb:minb:maxi:mini (Temperature Sensor Error, on ERROR_MSG)  (**5**)
+-  e:r:p:msg:rpv:avb:avi:maxi:mini (Temperature Sensor Error, on ERROR_MSG)        (**6**)
+-  (original_payload-(last 4 bytes)):x                                             (**7**)
 
 
 **Notes on control fields**
@@ -146,9 +146,29 @@ Our ArduinoMKRFOX1200 patient monitoring program will deliver messages to the Si
   **Given that a percentage won't reach any value higher than 100, we use the the most significant bit (i) from every r value on the rpv field to compound a three-bit indicator of the payload format variant**.
 
 
+## Downlink Payload Format
+
+Sigfox Downlink messages are shorter than Uplink messages, being an 8-byte packet the largest one allowed. The number of downlink messages per day allowed by Sigfox is reduced to 4.
+
+In this case we'll set a single variant for the payload. First of all, let's define the terminology:
+
+- **rtc**: current time (2 bytes + 1 bit)
+- **msg**: total amount of uplink messages sent on the current day. (1 byte)
+- **ub**:  upper bpm limit to be set on the Monitoring program (1 byte)
+- **lb**:  lower bpm limit to be set on the Monitoring program (1 byte)
+- **bt**:  time in seconds that a bpm limit can be exceeded without triggering an emergency condition (7 bits)
+- **bx**:  delay in seconds that must exist between an upper limit exceeded and a lower limit exceeded (2 bytes)
+
+
+* Downlink Payload Format (8 bytes):
+
+- rtc:bt:msg:ub:lb:bx
+
+
 ## Getting measures with [measures.ino](https://github.com/carlossaav/Patient-monitoring-with-Sigfox/blob/devel/src/test/measures/measures.ino)
 
 Hence, once you have everything setup on your board and cloned the project, you're ready to run our test sketch, [measures.ino](https://github.com/carlossaav/Patient-monitoring-with-Sigfox/blob/devel/src/test/measures/measures.ino) onto your ArduinoMKRFOX1200.
 
 This sketch is set to run about 12-13 minutes by default, making sampling rounds of 1-2 minutes, but you can change it modifying the corresponding constants at the top of the sketch. At about the end of each round, you should see something like this on your Serial Window:
+
 ![Serial_Snapshot](doc/images/round_10.jpg)

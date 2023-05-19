@@ -55,14 +55,13 @@
 // Time before enabling 'critical' emergency shipment's rate again
 #define NEW_EMERG_DELAY 1200000 // 20 min
 
-// Limits exceeded counter threshold to activate Emergency shipment's policy
-#define LIM_COUNT_EPOL_TRIGGERING 50 // Getting this as a measure of time exceeding a limit
+// Bpm Limit exceeded threshold to activate Emergency shipment's policy
+#define BPM_LIM_COUNT_EPOL_TRIGGERING 22500 // Getting this as a measure of time exceeding a bpm limit. 30000 samples equals to 1 minute more less
 
 #define BOTH_LIMITS_EXCEEDED_DELAY 60000 // Time to reach the opposite bpm limit again
 
 
 #define MAX_UPLINK_MSGS 140
-// #define MAX_DOWNLINK_MSGS ?
 #define SHIPMENT_INTERVAL 630000  // 10'30"
 #define SHIPMENT_INTERVAL_MIN ((float)(SHIPMENT_INTERVAL/1000)/60.0)
 // if SHIPMENT_INTERVAL == 10'30", at 23:58:30, msg == 137
@@ -139,7 +138,7 @@ byte rec_matrix[MAX_RECOVERY_MSG][SHIPMENT_BUFFER_SIZE];
 
 
 struct bpm_limit {
-  unsigned long counter;  // Counter of times the measure (high or low bpm limit) has been exceeded
+  unsigned int counter;  // Counter of times the measure (high or low bpm limit) has been exceeded
   unsigned long tstamp;   // timestamp of last limit exceeded
 };
 
@@ -147,38 +146,35 @@ struct bpm_limit {
 /* bpm_limits[0][1] for upper and lower bpm measurements */
 struct bpm_limit bpm_limits[2];
 
-// Counters
-int msg;   // sent messages
-unsigned int bpm_ibi_sample_counter;
-unsigned long limits_exceeded_counter;
 
-// int max_downlink_msgs;
+byte ubpm_lim = UPPER_BPM_LIMIT;
+byte lbpm_lim = LOWER_BPM_LIMIT;
 
-// Shipment attempts
-byte ship_attempt = 0;
+unsigned int bpm_lim_epol_trigg = BPM_LIM_COUNT_EPOL_TRIGGERING;
+unsigned long both_exceeded_delay = BOTH_LIMITS_EXCEEDED_DELAY;
 
-// Last shipment timestamp
-unsigned long shipment;
+/* Counters */
+int msg = 0;   // sent messages
+unsigned int bpm_ibi_sample_counter = 0;
+unsigned long limits_exceeded_counter = 0;
 
-// Last ALARM_MSG timestamp
-unsigned long amsg = 0;
+
+byte ship_attempt = 0;      // Shipment attempts
+unsigned long shipment = 0; // Last shipment timestamp
+unsigned long amsg = 0;     // Last ALARM_MSG timestamp
 
 /* Last timestamp of a shipment caused by
  * an emergency limit exceeded detection */
 unsigned long elim_msg = 0;
 
-// elim exceeded detection
-byte elim = 0;
+byte elim = 0; // elim exceeded detection
 
-/* Emergency shipment's policy activation/deactivation timestamp
- * epol_act is also the timestamp of an emergency activation condition */
-unsigned long epol_act, epol_deact;
+/* Shipment policies activation/deactivation timestamp.
+ * (epol_act is also the timestamp of an emergency activation condition) */
+unsigned long epol_act = 0, epol_deact = 0;
+unsigned long rpol_act = 0; // Recovery shipment policy activation timestamp
 
-// Recovery shipment policy activation timestamp
-unsigned long rpol_act;
-
-
-// Shipment policies (activated/deactivated)
+/* Shipment policies (activated/deactivated) */
 byte epol = 0;
 byte rpol = 0;
 
@@ -208,7 +204,7 @@ byte rec_non_critic_eseq_index = 0;
 
 /* Used to store the delay generated in shipment's logic
  * by shipment policies */
-int acc_delay;
+int acc_delay = 0;
 
 /* Before getting into any of the emergency sequences, we must
  * check whether it's going to be possible to recover the
@@ -224,14 +220,15 @@ byte eled = LOW;
 byte sigfox_led = LOW;
 byte sensor_led = LOW;
 
+
 // Indicate whether EMERGENCY_LED|SIGFOX_LED are flashing or not
 byte eflash = 0;
 byte sigfox_flash = 0;
 
-// Blink SENSORS_LED with every heartbeat
-byte blink_on_pulse = 1;
 
-// Indicates error on sigfox|sensors
+byte blink_on_pulse = 1; // Blink SENSORS_LED with every heartbeat
+
+// Indicate error on sigfox|sensors
 byte sigfox_err = 0;
 byte pulsesensor_err = 0;
 byte temp_err = 0;
@@ -263,14 +260,6 @@ void setup() {
 
   attachInterrupt(digitalPinToInterrupt(INPUT_BUTTON_PIN), button_pressed, FALLING);
 
-  msg = 0;
-  shipment = 0;
-  acc_delay = 0;
-  //  max_downlink_msgs = ;
-  epol_act = 0;
-  epol_deact = 0;
-  rpol_act = 0;
-
   reset_measures();
   set_rec_seqs();
 
@@ -285,10 +274,7 @@ void setup() {
   sigfox_check();
   if (!sigfox_err) {
     // device_id = SigFox.ID().toInt();
-    // DOWNLINK_MSG (blink_on_pulse parameter, time, etc.)
-    // blink_on_pulse = ; time = ; etc.
     SigFox.end(); // Send the module to sleep
-    // All the power saving features are enabled.
   }
   else {
     // implement behaviour
@@ -319,7 +305,21 @@ void setup() {
     flash_led(SENSORS_LED);
   }
 
+  rtc.begin();
+  rtc.setTime(0, 0, 1); // Initially assume it's 00:00:01 h
+
+  rtc.setAlarmTime(0, 0, 0); // Set alarm at 00:00:00 h
+  rtc.enableAlarm(rtc.MATCH_HHMMSS);
+  rtc.attachInterrupt(reset_day);
+  
   sched_shipment(SHIPMENT_INTERVAL, 0);
+}
+
+
+
+/* Executed at 00:00:00 h to reset msg counter */
+void reset_day() {
+  msg = 0;
 }
 
 
@@ -406,7 +406,7 @@ void sigfox_check() {
   byte round = 0;
 
   if (!sigfox_err) {
-    if (init_sigfox_module()) {
+    if (init_sigfox_module()==0) {
       // timer::stop
       return;
     }
@@ -426,6 +426,7 @@ void sigfox_check() {
       return;
     }
     SigFox.reset();
+    SigFox.status();  // Clears all pending interrupts
   }
   sigfox_err = 0;
   // timer::stop??
@@ -435,9 +436,10 @@ void sigfox_check() {
 int init_sigfox_module() {
   if (SigFox.begin()) {
     sigfox_err = 0;
-    return 1;
+    SigFox.status();  // Clears all pending interrupts
+    return 0;
   }
-  return 0;
+  return 1;
 }
 
 
@@ -473,11 +475,7 @@ int calc_delay() {
   int expected_msg, delay;
   float min_day;
 
-  // We can't delay the knowledge of date and hour, msg values
-  if (!downlink_done)
-    // DOWNLINK_MSG. Get and set parameters (msg, RTC, etc.)
-
-  min_day =  rtc.getHours()*60 + rtc.getMinutes() + (((float)rtc.getSeconds())/60.0);
+  min_day =  (float)(rtc.getHours()*60) + (float)rtc.getMinutes() + (((float)rtc.getSeconds())/60.0);
   expected_msg = ((int)(min_day/SHIPMENT_INTERVAL_MIN)) + REMAINING_MSG;
 
   if (msg < expected_msg)
@@ -493,8 +491,21 @@ int calc_delay() {
   return delay;
 }
 
-
+//Developing
 int predict_delay(byte eseq) {
+
+  int code = 0;
+  int delay = calc_delay(); // Check whether there's any accumulated delay already
+
+  if (eseq == CRITIC_ESEQ_REF) {
+    /* if (succesful prediction) code = 0;
+     * else code = 1; */
+  }
+  else { // eseq == NON_CRITIC_ESEQ_REF
+    /* if (succesful prediction) code = 0;
+     * else code = 2; */
+  }
+  return code;
 }
 
 
@@ -688,19 +699,75 @@ void check_retry() {
   }
 }
 
-// Simulate shipment
-int mock_sigfox_call(byte arr[]) {
-  // simulate that it takes about 4 sec to send a message
-  delay(4000);
-  return random(100);
+
+int get_downlink(unsigned long delay) {
+
+  byte *p = (byte *)&both_exceeded_delay;
+  byte aux = 0, hour = 0, min = 0, sec = 0;
+  unsigned int conv, quotient;
+  int i=0;
+
+  /* Get hour from recv_buff */
+  for (int i=4; i>=0; i--)
+    bitWrite(hour, i, bitRead(recv_buff[0], i+3));
+
+  /* Get minutes from recv_buff */
+  for (int i=5; i>=3; i--)
+    bitWrite(min, i, bitRead(recv_buff[0], i-3));
+  for (int i=2; i>=0; i--)
+    bitWrite(min, i, bitRead(recv_buff[1], i+5));
+
+  /* Get seconds from recv_buff */
+  for (int i=5; i>=1; i--)
+    bitWrite(sec, i, bitRead(recv_buff[1], i-1));
+  bitWrite(sec, 0, bitRead(recv_buff[2], 7));
+
+  conv = (unsigned int)sec + delay;
+  quotient = (conv / 60);
+  sec = (byte)(conv % 60);
+
+  if (quotient != 0) {
+    conv = (unsigned int)min + quotient;
+    quotient = conv / 60;
+    min = (byte)(conv % 60);
+    hour += quotient;
+    hour %= 24;
+  }
+
+  rtc.setTime(hour, min, sec);
+
+  bpm_lim_epol_trigg = 0;
+  aux = 0;
+  for (int i=6; i>=0; i--)
+    bitWrite(aux, i, bitRead(recv_buff[2], i));
+
+  /* Since bpm_lim_epol_trigg comes in seconds on recv_buff, we have to
+   * translate it to the equivalent amount of bpm readings in that time,
+   * assuming that we gather around 30*10⁴ samples per minute more less */
+
+  bpm_lim_epol_trigg = (unsigned int)aux * 500;
+
+  msg = recv_buff[3];
+  ubpm_lim = recv_buff[4];
+  lbpm_lim = recv_buff[5];
+
+  // Get and set both_exceeded_delay from recv_buff (Little-Endian)
+  both_exceeded_delay = 0;
+  p[1] = recv_buff[6];
+  p[0] = recv_buff[7];
+  both_exceeded_delay *= 1000; // We work in milliseconds
+
+  return 0;
 }
+
 
 void send_measurements(byte ereason_payload) {
 
   static float temp;
   static unsigned long tstamp, temp_tstamp = 0;
   byte msg_type = REPORT_MSG;
-  byte payload_format;
+  byte payload_format, code;
+  String message;
 
   if (ship_attempt++==0) {
     byte i=0;
@@ -952,10 +1019,6 @@ void send_measurements(byte ereason_payload) {
 
   /* Payload configured on send_buff */
 
-  // We can't delay the knowledge of msg value (Call to Sigfox Backend with DOWNLINK_MSG)
-  if (!downlink_done)
-    // DOWNLINK_MSG. Get and set parameters (msg, RTC, etc.)
-
   if (msg == MAX_UPLINK_MSGS) {
     // sleep/continue sampling ??
     handle_failed_shipment();  // Payload already computed on send_buff
@@ -966,7 +1029,7 @@ void send_measurements(byte ereason_payload) {
 
   /* Sigfox Module checking */
 
-  if (!init_sigfox_module()) {
+  if (init_sigfox_module() != 0) {
     if (!sigfox_err) {
       sigfox_check();  // Initiate regular sigfox module checking
       if (sigfox_err) {
@@ -984,9 +1047,20 @@ void send_measurements(byte ereason_payload) {
 
   pulseSensor.pause();
 
-  /* Shipping...*/
+  /* Shipping... */
 
-  if (mock_sigfox_call(send_buff)) {
+  message = String((char)send_buff[0]);
+
+  for (int i=1; i<SHIPMENT_BUFFER_SIZE; i++)
+    message.concat(send_buff[i]);
+
+  SigFox.beginPacket();
+  SigFox.print(message);
+
+  if (!downlink_done) code = SigFox.endPacket(true);  // Set Downlink Request by passing true to endPacket()
+  else code = SigFox.endPacket();
+
+  if (code==0) {
 
     shipment = millis(); msg++;
     button_pushed = 0;
@@ -1005,6 +1079,15 @@ void send_measurements(byte ereason_payload) {
     reset_measures();
     reset_buff(send_buff);
 
+    if (!downlink_done && (SigFox.parsePacket() == RECEIVING_BUFFER_SIZE)) {  // Extract Downlink Message
+      reset_buff(recv_buff);
+      for (int i=0; i<RECEIVING_BUFFER_SIZE; i++) {
+        if (SigFox.available())
+          recv_buff[i] = SigFox.read();
+      }
+      get_downlink(0);
+      downlink_done = 1;
+    }
 
     /* Pick up the last pending payload from rec_matrix[] and send it */
 
@@ -1024,8 +1107,17 @@ void send_measurements(byte ereason_payload) {
       tstamp = millis() - tstamp;
 
       if (tstamp <= MAX_RECOVERY_TIME) {
+
+        String message = String((char)rec_matrix[rec_matrix_index][0]);
         write_rec_tstamp(&tstamp);
-        if (mock_sigfox_call(rec_matrix[rec_matrix_index])) {
+
+        for (int j=1; j<SHIPMENT_BUFFER_SIZE; j++)
+          message.concat(rec_matrix[rec_matrix_index][j]);
+
+        SigFox.beginPacket();
+        SigFox.print(message);
+
+        if (SigFox.endPacket()==0) {  // Send buffer to SIGFOX network
           shipment = millis(); msg++;
           reset_buff(rec_matrix[rec_matrix_index]);
           if (--rec_matrix_counter==0)
@@ -1129,18 +1221,15 @@ void deact_epol() {
  */
 byte check_eseq_act(byte eseq) {
 
-  // Check whether there's already any accumulated delay
-  int delay = calc_delay();
+  byte seq = 0;
 
-  // if eseq == CRITIC_ESEQ_REF
-      // try critic_eseq (predict_delay(CRITIC_ESEQ_REF))
-      // if success
-          // return CRITIC_ESEQ_REF;
+  if ((eseq == CRITIC_ESEQ_REF) && (predict_delay(CRITIC_ESEQ_REF)==0))
+    seq = CRITIC_ESEQ_REF;
+  else
+    if (predict_delay(NON_CRITIC_ESEQ_REF)==0)
+      seq = NON_CRITIC_ESEQ_REF;
 
-  // try non_critic_eseq (predict_delay(NON_CRITIC_ESEQ_REF))
-      // if success
-        // return NON_CRITIC_ESEQ_REF;
-      // else return 0;
+  return seq;
 }
 
 
@@ -1278,6 +1367,7 @@ byte check_elimits(byte measure, byte value) {
 // call ship_timer.resume() wherever you don't call send_measurements()
 void limit_exceeded(byte measure, byte value) {
 
+  unsigned long tstamp = millis();
   byte both_exceeded, aux, i;
 
   limits_exceeded_counter++;
@@ -1293,7 +1383,7 @@ void limit_exceeded(byte measure, byte value) {
   }
 
   bpm_limits[i].counter++;
-  bpm_limits[i].tstamp = millis();
+  bpm_limits[i].tstamp = tstamp;
 
   if (check_elimits(measure, value)) {
 
@@ -1321,7 +1411,7 @@ void limit_exceeded(byte measure, byte value) {
 
   if (both_exceeded) {
     // max and min limits of bpm violated, trigger emergency
-    if ((millis() - bpm_limits[i].tstamp) <= BOTH_LIMITS_EXCEEDED_DELAY) {
+    if ((tstamp - bpm_limits[i].tstamp) < both_exceeded_delay) {
       if (fire_epol(0)) {
         act_emergency(); // do it here?
         sched_shipment(0, 1);
@@ -1334,7 +1424,7 @@ void limit_exceeded(byte measure, byte value) {
     i = aux; // Restore index
   }
 
-  if (bpm_limits[i].counter > LIM_COUNT_EPOL_TRIGGERING) {
+  if (bpm_limits[i].counter > bpm_lim_epol_trigg) {
   /* Limits exceeded too many times.
    * Activate emergency shipment's policy. */
     if (fire_epol(0)) {
@@ -1360,11 +1450,11 @@ byte check_lower_limit(float temperature) {
 }
 
 byte check_upper_limit(byte bpm) {
-  return (bpm > UPPER_BPM_LIMIT);
+  return (bpm > ubpm_lim);
 }
 
 byte check_lower_limit(byte bpm) {
-  return (bpm < LOWER_BPM_LIMIT);
+  return (bpm < lbpm_lim);
 }
 
 
@@ -1383,11 +1473,14 @@ void set_max_and_min(byte bpm, int ibi) {
       min_ibi = ibi;
 }
 
-byte bytecast(int bpm) {
-  if (bpm<0) return byte(0);
+
+byte bytecast(int value) {
+  if (value<0)
+    return (byte)0;
   else
-    if (bpm>255) return byte(255);
-  return byte(bpm);
+    if (value>255)
+      return (byte)255;
+  return byte(value);
 }
 
 
