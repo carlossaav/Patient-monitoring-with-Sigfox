@@ -31,7 +31,7 @@
 
 #define PULSE_PIN 0                // PulseSensor WIRE connected to ANALOG PIN 0
 #define INPUT_BUTTON_PIN 5         // DIGITAL PIN 5 USED TO INTERRUPT whenever the button is pressed
-#define HEARTBEAT_LED LED_BUILTIN  // Blinks with every heartbeat. AÑADIR NUEVO LED para sensor temperatura?
+#define HEARTBEAT_LED LED_BUILTIN  // Blinks with every heartbeat.
 #define LIMIT_EXCEEDED_LED 7       // Blinks whenever a bpm limit exceeded occurs
 #define EMERGENCY_LED 8            // Used on emergencies
 

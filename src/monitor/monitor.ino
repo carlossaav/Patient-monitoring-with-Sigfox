@@ -4,20 +4,22 @@
 #include <RTCZero.h>
 #include <Wire.h>
 #include <Protocentral_MAX30205.h>
+#include <TimerObject.h>
 
 
 #define PULSE_PIN 0            // PulseSensor WIRE connected to ANALOG PIN 0
+#define NOISE_PIN 4            // Provide a random input with analogRead() on this pin for the random number generator
 #define INPUT_BUTTON_PIN 5     // DIGITAL PIN 5 USED TO INTERRUPT whenever the button is pressed
+#define SIGFOX_LED LED_BUILTIN
 #define SENSORS_LED 7          // Blinks with every heartbeat
 #define EMERGENCY_LED 8        // Used on emergencies
-#define SIGFOX_LED LED_BUILTIN
-#define NOISE_PIN 4            // Provide a random input with analogRead() on this pin for the random number generator
 
-#define PULSE_THRESHOLD 2140   // Determine which Signal to "count as a beat" and which to ignore
+
+#define PULSE_THRESHOLD 2150   // Determine which Signal to "count as a beat" and which to ignore
 
 #define UPPER_BPM_MEASURE 0
-#define UPPER_BPM_LIMIT 125
-#define UPPER_BPM_ELIMIT 145
+#define UPPER_BPM_LIMIT 120
+#define UPPER_BPM_ELIMIT 140
 #define LOWER_BPM_MEASURE 1
 #define LOWER_BPM_LIMIT 70
 #define LOWER_BPM_ELIMIT 60
@@ -82,13 +84,8 @@
 #define TEMP_MEASURING_DELAY 1200000 // Minimal delay on milliseconds to send temperature again (20 min)
 
 
-// keep the EMERGENCY_LED 2 seconds flashing on emergency
-#define EMERG_FLASH 2000
-// keep the SIGFOX_LED||SENSORS_LED 4 seconds flashing on error
-#define BUG_FLASH 4000
-
-
-#define SHIPMENT_TIMER 0
+#define EMERG_FLASH 2000  // keep the EMERGENCY_LED 2 seconds flashing on emergency
+#define BUG_FLASH 4000    // keep the SIGFOX_LED||SENSORS_LED 4 seconds flashing on error
 
 
 #define CRITIC_ESEQ_REF 1
@@ -186,6 +183,7 @@ byte rpol = 0;
 byte new_emergency = 1;
 byte emergency = 0;
 
+byte ereason_payload = 0; // Payload originating the current emergency
 
 /* Emergency && Recovery shipment sequences */
 
@@ -226,8 +224,6 @@ byte eflash = 0;
 byte sigfox_flash = 0;
 
 
-byte blink_on_pulse = 1; // Blink SENSORS_LED with every heartbeat
-
 // Indicate error on sigfox|sensors
 byte sigfox_err = 0;
 byte pulsesensor_err = 0;
@@ -239,6 +235,13 @@ PulseSensorPlayground pulseSensor;
 RTCZero rtc;
 MAX30205 tempSensor;
 
+TimerObject *ship_timer = new TimerObject(SHIPMENT_INTERVAL, &send_measurements);
+TimerObject *sigfox_check_timer = new TimerObject(CHECK_ERROR_COND, &sigfox_check);
+TimerObject *sensor_check_timer = new TimerObject(CHECK_ERROR_COND, &pulsesensor_check);
+
+TimerObject *sigfox_led_timer = new TimerObject((unsigned long int)BUG_FLASH, &flash_sigfox_led);
+TimerObject *sensors_led_timer = new TimerObject((unsigned long int)BUG_FLASH, &flash_sensors_led);
+TimerObject *eled_timer = new TimerObject((unsigned long int)EMERG_FLASH, &flash_emergency_led);
 
 void setup() {
 
@@ -269,41 +272,41 @@ void setup() {
   for (int i=0; i<MAX_RECOVERY_MSG; i++)
     reset_buff(rec_matrix[i]);
 
+  disable_timer(eled_timer);
+
   /* Checking  Sigfox Module... */
+
   SigFox.noDebug();
   sigfox_check();
   if (!sigfox_err) {
     // device_id = SigFox.ID().toInt();
+    disable_timer(sigfox_check_timer);
+    disable_timer(sigfox_led_timer);
     SigFox.end(); // Send the module to sleep
-  }
-  else {
-    // implement behaviour
   }
 
 
   // Configure the PulseSensor object
   pulseSensor.analogInput(PULSE_PIN);
   pulseSensor.setThreshold(PULSE_THRESHOLD);
-
-  if (blink_on_pulse) // configured to blink on pulse
-    pulseSensor.blinkOnPulse(SENSORS_LED); // blink SENSORS_LED with every heartbeat
+  pulseSensor.blinkOnPulse(SENSORS_LED);  // blink SENSORS_LED with every heartbeat
 
 
   /* Checking sensors... */
 
+  disable_timer(sensor_check_timer);
+  disable_timer(sensors_led_timer);
+
   if (!pulseSensor.begin()) {
     pulsesensor_err = 1;
-    pulsesensor_check(); // Initiate regular PulseSensor checking on error
+    pulsesensor_check();  // Initiate regular PulseSensor checking on error
   }
 
   if (!tempSensor.scanAvailableSensors())
     temp_err = 1;
 
-  if (pulsesensor_err || temp_err) {
-    if (blink_on_pulse)
-      // Stop blinking bpm. Possible?
-    flash_led(SENSORS_LED);
-  }
+  if (pulsesensor_err || temp_err)
+    flash_sensors_led();
 
   rtc.begin();
   rtc.setTime(0, 0, 1); // Initially assume it's 00:00:01 h
@@ -311,21 +314,18 @@ void setup() {
   rtc.setAlarmTime(0, 0, 0); // Set alarm at 00:00:00 h
   rtc.enableAlarm(rtc.MATCH_HHMMSS);
   rtc.attachInterrupt(reset_day);
-  
-  sched_shipment(SHIPMENT_INTERVAL, 0);
+
+  sched_shipment(SHIPMENT_INTERVAL);
 }
 
 
-
-/* Executed at 00:00:00 h to reset msg counter */
+/* Executed at 00:00:00 h */
 void reset_day() {
   msg = 0;
 }
 
-
 void set_rec_seqs() {
 }
-
 
 void reset_buff(byte arr[]) {
   for (int i=0; i<(sizeof(arr)); i++)
@@ -333,54 +333,57 @@ void reset_buff(byte arr[]) {
 }
 
 
-/* Flash EMERGENCY_LED on emergency or
- * SENSORS_LED/SIGFOX_LED on [sensors|sigfox module] error
- */
-void flash_led(byte led) {
+// Flash SIGFOX_LED on sigfox module error
+void flash_sigfox_led() {
 
-  unsigned long delay;
-  byte timer, cond;
-  byte *led_state;
+  sigfox_led_timer->Stop();
 
-  switch (led) {
-    case EMERGENCY_LED:
-      delay = EMERG_FLASH;
-      led_state = &eled;
-      cond = emergency_active();
-      //timer = 0;
-      break;
-    case SIGFOX_LED:
-      delay = BUG_FLASH;
-      led_state = &sigfox_led;
-      cond = sigfox_err;
-      //timer = 1;
-      break;
-    case SENSORS_LED:
-      delay = BUG_FLASH;
-      led_state = &sensor_led;
-      cond = (pulsesensor_err || temp_err);
-      //timer = 2;
-      break;
-  }
-
-  if (cond) {
-    *led_state = !(*led_state);
-    digitalWrite(led, *led_state);
-    // timer::set(delay, flash_led(led));
-    // timer::start();
+  if (sigfox_err) {
+    sigfox_led = !sigfox_led;
+    digitalWrite(SIGFOX_LED, sigfox_led);
+    sched_event(sigfox_led_timer, BUG_FLASH);
   }
   else {
-    *led_state = LOW;
-    digitalWrite(led, LOW);
-    // deactivate timer
-    switch (led) {
-      case EMERGENCY_LED:
-        eflash = 0;
-        break;
-      case SIGFOX_LED:
-        sigfox_flash = 0;
-        break;
-    }
+    sigfox_led = LOW;
+    digitalWrite(SIGFOX_LED, LOW);
+    disable_timer(sigfox_led_timer);
+    sigfox_flash = 0;
+  }
+}
+
+// Flash SENSORS_LED on sensor error
+void flash_sensors_led() {
+
+  sensors_led_timer->Stop();
+
+  if (pulsesensor_err || temp_err) {
+    sensor_led = !sensor_led;
+    digitalWrite(SENSORS_LED, sensor_led);
+    sched_event(sensors_led_timer, BUG_FLASH);
+  }
+  else {
+    sensor_led = LOW;
+    digitalWrite(SENSORS_LED, LOW);
+    disable_timer(sensors_led_timer);
+  }
+}
+
+
+// Flash EMERGENCY_LED on emergency
+void flash_emergency_led() {
+
+  eled_timer->Stop();
+
+  if (emergency_active()) {
+    eled = !eled;
+    digitalWrite(EMERGENCY_LED, eled);
+    sched_event(eled_timer, EMERG_FLASH);
+  }
+  else {
+    eled = LOW;
+    digitalWrite(EMERGENCY_LED, LOW);
+    disable_timer(eled_timer);
+    eflash = 0;
   }
 }
 
@@ -389,15 +392,16 @@ void pulsesensor_check() {
 
   byte round = 0;
 
+  sensor_check_timer->Stop();
+
   while (!pulseSensor.begin()) {
     if (++round==5) { // Ensure at least 5 calls
-      // timer::set(CHECK_ERROR_COND, pulsesensor_check());
-      // timer::start();
+      sched_event(sensor_check_timer, CHECK_ERROR_COND);
       return;
     }
   }
   pulsesensor_err = 0;
-  // timer::stop??
+  disable_timer(sensor_check_timer);
 }
 
 
@@ -405,38 +409,38 @@ void sigfox_check() {
 
   byte round = 0;
 
+  sigfox_check_timer->Stop();
+
   if (!sigfox_err) {
     if (init_sigfox_module()==0) {
-      // timer::stop
+      disable_timer(sigfox_check_timer);
       return;
     }
   }
 
-  // Sigfox shield error
-  sigfox_err = 1;
+  sigfox_err = 1; // Sigfox shield error
   if (!sigfox_flash) {
     sigfox_flash = 1;
-    flash_led(SIGFOX_LED);
+    flash_sigfox_led();
   }
 
   while (!SigFox.begin()) {
     if (++round==5) { // Ensure at least 5 calls
-      // timer::set(CHECK_ERROR_COND, sigfox_check());
-      // timer::start();
+      sched_event(sigfox_check_timer, CHECK_ERROR_COND);
       return;
     }
+    SigFox.status(); // Clears all pending interrupts
     SigFox.reset();
-    SigFox.status();  // Clears all pending interrupts
   }
   sigfox_err = 0;
-  // timer::stop??
+  disable_timer(sigfox_check_timer);
 }
 
 
 int init_sigfox_module() {
   if (SigFox.begin()) {
     sigfox_err = 0;
-    SigFox.status();  // Clears all pending interrupts
+    SigFox.status();
     return 0;
   }
   return 1;
@@ -446,6 +450,7 @@ int init_sigfox_module() {
 void reset_measures() {
 
   /* Initialize these vars to unlikely (impossible) values */
+
   max_bpm = 0;
   min_bpm = 255;
   avg_bpm = 0;
@@ -522,7 +527,7 @@ void resched_ship_pol(unsigned long delay) {
   unsigned long *seq;
 
  // Initially schedule next shipment in (SHIPMENT_INTERVAL - delay) milliseconds
-  sched_shipment(check_interval(SHIPMENT_INTERVAL - delay), 0);
+  sched_shipment(check_interval(SHIPMENT_INTERVAL - delay));
 
   if (epol_active()) {
 
@@ -552,7 +557,7 @@ void resched_ship_pol(unsigned long delay) {
         act_rpol();
     }
     else {
-      sched_shipment(check_interval(seq[*index] - delay), 0);
+      sched_shipment(check_interval(seq[*index] - delay));
       (*index)++;
     }
   }
@@ -562,7 +567,7 @@ void resched_ship_pol(unsigned long delay) {
     if ((calc_delay())==0) {
       // rec_interrupted = 0;
       deact_rpol();
-      sched_shipment(SHIPMENT_INTERVAL, 0);
+      sched_shipment(SHIPMENT_INTERVAL);
     }
     else {
       if (new_emergency) {
@@ -573,7 +578,7 @@ void resched_ship_pol(unsigned long delay) {
         seq = rec_non_critic_eseq;
         index = &rec_non_critic_eseq_index;
       }
-      sched_shipment(check_interval(seq[*index] - delay), 0);
+      sched_shipment(check_interval(seq[*index] - delay));
       if (++(*index) == (sizeof(seq) / sizeof(seq[0])))
         *index = 0;
     }
@@ -686,6 +691,7 @@ void handle_failed_shipment() {
   reset_buff(send_buff);
   resched_ship_pol(0);
   ship_attempt = 0;
+  ereason_payload = 0;
 }
 
 
@@ -694,13 +700,14 @@ void check_retry() {
   if (ship_attempt == MAX_SHIPMENT_RETRIES)
     handle_failed_shipment();
   else {
+    ereason_payload = (byte)bitRead(send_buff[0], 6);
     reset_buff(send_buff);
-    sched_shipment(SHIPMENT_RETRY, bitRead(send_buff[0], 6));
+    sched_shipment(SHIPMENT_RETRY);
   }
 }
 
 
-int get_downlink(unsigned long delay) {
+void get_downlink(unsigned long delay) {
 
   byte *p = (byte *)&both_exceeded_delay;
   byte aux = 0, hour = 0, min = 0, sec = 0;
@@ -756,12 +763,10 @@ int get_downlink(unsigned long delay) {
   p[1] = recv_buff[6];
   p[0] = recv_buff[7];
   both_exceeded_delay *= 1000; // We work in milliseconds
-
-  return 0;
 }
 
 
-void send_measurements(byte ereason_payload) {
+void send_measurements() {
 
   static float temp;
   static unsigned long tstamp, temp_tstamp = 0;
@@ -773,6 +778,8 @@ void send_measurements(byte ereason_payload) {
     byte i=0;
 
     tstamp = millis();
+    ship_timer->Stop();
+
     while (temp_err) {
       if (++i==2) {
         temp = TEMP_READING_ERR; // Set temp value to TEMP_READING_ERR to indicate failure
@@ -788,16 +795,11 @@ void send_measurements(byte ereason_payload) {
       temp_tstamp = millis();
       tempSensor.shutdown();
 
-      if (check_upper_limit(temp)) {
-        // ship_timer.pause();
+      if (check_upper_limit(temp))
         limit_exceeded(UPPER_TEMP_MEASURE, 0);
-      }
-      else {
-        if (check_lower_limit(temp)) {
-          // ship_timer.pause();
+      else
+        if (check_lower_limit(temp))
           limit_exceeded(LOWER_TEMP_MEASURE, 0);
-        }
-      }
     }
   }
 
@@ -1064,6 +1066,7 @@ void send_measurements(byte ereason_payload) {
 
     shipment = millis(); msg++;
     button_pushed = 0;
+    ereason_payload = 0;
 
     if (msg_type == ALARM_MSG || msg_type == ALARM_LIMITS_MSG) {
       amsg = shipment;
@@ -1150,22 +1153,26 @@ void send_measurements(byte ereason_payload) {
 }
 
 
-/*
-void set_timer(byte timer, unsigned long ms, void *args) {
-  // Reset timer, first of all. Pending?
-  switch (timer) {
-    case SHIPMENT_TIMER:
-      // Reset timer, first of all. Pending?
-      // if (ms==0) send_measurements(ereason_payload)??? directamente, sin timer. ??
-      // timer::set(ms, send_measurements(ereason_payload));
-      // timer::start();
-      break;
-  }
-}
-*/
 
-void sched_shipment(unsigned long ms, byte ereason_payload) {
-  //set_timer(timer, ms, ereason_payload);
+void disable_timer(TimerObject *timer) {
+  timer->Stop();
+  timer->setEnabled(false);
+}
+
+void sched_event(TimerObject *timer, unsigned long ms) {
+  timer->Stop(); // Reset timer
+  timer->setInterval(ms);
+  timer->setEnabled(true);
+  timer->Start();
+}
+
+void sched_shipment(unsigned long ms) {
+  if (ms==0) {
+    ship_timer->Stop();
+    send_measurements();
+  }
+  else
+    sched_event(ship_timer, ms);
 }
 
 
@@ -1286,7 +1293,8 @@ void admin_shipping(byte alarm) {
         if (fire_epol(alarm)) {
           // save rec_index
           deact_rpol();
-          sched_shipment(0, 1);
+          ereason_payload = 1;
+          sched_shipment(0);
         }
       }
       else { // epol is ongoing
@@ -1304,7 +1312,7 @@ void admin_shipping(byte alarm) {
             }
           }
           non_critic_eseq_index = 0;
-          sched_shipment(0, 0);
+          sched_shipment(0);
         }
         /* If it's not possible to restart any of the eseqs,
          * just wait for the next scheduled shipment
@@ -1313,18 +1321,19 @@ void admin_shipping(byte alarm) {
     }
   }
   else // No policies active
-    if (fire_epol(alarm))
-      sched_shipment(0, 1);
+    if (fire_epol(alarm)) {
+      ereason_payload = 1;
+      sched_shipment(0);
+    }
 }
 
-// call ship_timer.resume() wherever you don't call send_measurements()
 void handle_button_pushed() {
 
   act_emergency();
 
   if (!eflash) {
     eflash = 1;
-    flash_led(EMERGENCY_LED);
+    flash_emergency_led();
   }
 
   admin_shipping(1);
@@ -1363,8 +1372,6 @@ byte check_elimits(byte measure, byte value) {
 }
 
 
-// Interrupts issue
-// call ship_timer.resume() wherever you don't call send_measurements()
 void limit_exceeded(byte measure, byte value) {
 
   unsigned long tstamp = millis();
@@ -1414,7 +1421,8 @@ void limit_exceeded(byte measure, byte value) {
     if ((tstamp - bpm_limits[i].tstamp) < both_exceeded_delay) {
       if (fire_epol(0)) {
         act_emergency(); // do it here?
-        sched_shipment(0, 1);
+        ereason_payload = 1;
+        sched_shipment(0);
       }
       else {
         // implement behaviour
@@ -1429,7 +1437,8 @@ void limit_exceeded(byte measure, byte value) {
    * Activate emergency shipment's policy. */
     if (fire_epol(0)) {
       act_emergency(); // do it here?
-      sched_shipment(0, 1);
+      ereason_payload = 1;
+      sched_shipment(0);
     }
     else {
       // implement behaviour
@@ -1491,7 +1500,6 @@ void loop() {
 
   if (button_flag) {
     if (!button_pushed) {
-      // ship_timer.pause();
       button_pushed = 1;
       handle_button_pushed();
     }
@@ -1504,12 +1512,11 @@ void loop() {
      sample (analog voltage) from the PulseSensor. */
 
   if (!pulsesensor_err && pulseSensor.sawNewSample()) {
-    // reduce sampling? (32kb SRAM) The largest sampling interval will be one defined in rec_seqs
     bpm = bytecast(pulseSensor.getBeatsPerMinute());
     ibi = pulseSensor.getInterBeatIntervalMs();
     sum_bpm += bpm;
     sum_ibi += ibi;
-    bpm_ibi_sample_counter++; // count bpm and ibi readings. Protect var? (concurrency issues)
+    bpm_ibi_sample_counter++; // count bpm and ibi readings
     set_max_and_min(bpm, ibi);
 
     if (bpm<50) ranges[0]++;
@@ -1519,14 +1526,23 @@ void loop() {
     else ranges[4]++; // bpm > 130
 
     // check limits
-    if (check_upper_limit(bpm)) {
-      // ship_timer.pause();
+    if (check_upper_limit(bpm))
       limit_exceeded(UPPER_BPM_MEASURE, bpm);
-    }
     else
-      if (check_lower_limit(bpm)) {
-        // ship_timer.pause()
+      if (check_lower_limit(bpm))
         limit_exceeded(LOWER_BPM_MEASURE, bpm);
-      }
   }
+
+  ship_timer->Update();
+
+  if (sigfox_led_timer->isEnabled())
+    sigfox_led_timer->Update();
+  if (sigfox_check_timer->isEnabled())
+    sigfox_check_timer->Update();
+  if (sensors_led_timer->isEnabled())
+    sensors_led_timer->Update();
+  if (sensor_check_timer->isEnabled())
+    sensor_check_timer->Update();
+  if (eled_timer->isEnabled())
+    eled_timer->Update();
 }

@@ -132,7 +132,7 @@ Our ArduinoMKRFOX1200 patient monitoring program will deliver messages to the Si
 * 01: Emergency shipment policy is active
 * 10: Recovery shipment policy is active
 
-- Message type (**m field**): Indicates the message type of the payload.
+- Message type (**msg field**): Indicates the message type of the payload.
 
 - Bpm ranges fields + Payload format variant (**rpv field**): Looking to the first control bit from every value (percentage) from this field, we compound a three-bit indicator that lets the service know what kind of payload will have to process. The whole rpv field looks like this, having:
 
