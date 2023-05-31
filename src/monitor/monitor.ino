@@ -187,11 +187,17 @@ byte ereason_payload = 0; // Payload originating the current emergency
 
 /* Emergency && Recovery shipment sequences */
 
-// {30", 1', 2', 5', 2'30", 7', 5', 7'}
-unsigned long critic_eseq [] = {30000,60000,120000,300000,150000,420000,300000,420000};
-unsigned long non_critic_eseq [] = {90000,210000,540000,360000};
-unsigned long rec_critic_eseq [] = {};
-unsigned long rec_non_critic_eseq [] = {};
+int critic_eseq [] = {30000,60000,120000,300000,150000,420000,300000,420000};  // {30", 1', 2', 5', 2'30", 7', 5', 7'}
+byte critic_eseq_length = (byte)(sizeof(critic_eseq) / sizeof(critic_eseq[0]));
+
+int non_critic_eseq [] = {90000,210000,540000,360000};  // {1'30", 3'30", 9', 6'}
+byte non_critic_eseq_length = (byte)(sizeof(non_critic_eseq) / sizeof(non_critic_eseq[0]));
+
+int rec_critic_eseq [8];
+byte rec_critic_eseq_length = critic_eseq_length;
+
+int rec_non_critic_eseq [4];
+byte rec_non_critic_eseq_length = non_critic_eseq_length;
 
 
 // Go through the previous sequences
@@ -218,11 +224,9 @@ byte eled = LOW;
 byte sigfox_led = LOW;
 byte sensor_led = LOW;
 
-
 // Indicate whether EMERGENCY_LED|SIGFOX_LED are flashing or not
 byte eflash = 0;
 byte sigfox_flash = 0;
-
 
 // Indicate error on sigfox|sensors
 byte sigfox_err = 0;
@@ -263,9 +267,8 @@ void setup() {
 
   attachInterrupt(digitalPinToInterrupt(INPUT_BUTTON_PIN), button_pressed, FALLING);
 
-  reset_measures();
   set_rec_seqs();
-
+  reset_measures();
   reset_buff(recv_buff);
   reset_buff(send_buff);
 
@@ -276,7 +279,8 @@ void setup() {
 
   /* Checking  Sigfox Module... */
 
-  SigFox.noDebug();
+//  SigFox.noDebug();
+  SigFox.debug();  // Indicate signal event; disable power saving features by default to gain time accuracy on shipments
   sigfox_check();
   if (!sigfox_err) {
     // device_id = SigFox.ID().toInt();
@@ -285,12 +289,10 @@ void setup() {
     SigFox.end(); // Send the module to sleep
   }
 
-
   // Configure the PulseSensor object
   pulseSensor.analogInput(PULSE_PIN);
   pulseSensor.setThreshold(PULSE_THRESHOLD);
   pulseSensor.blinkOnPulse(SENSORS_LED);  // blink SENSORS_LED with every heartbeat
-
 
   /* Checking sensors... */
 
@@ -325,6 +327,28 @@ void reset_day() {
 }
 
 void set_rec_seqs() {
+
+  for (int i=0; i<rec_critic_eseq_length; i++)
+    rec_critic_eseq[i] = (int)SHIPMENT_INTERVAL + ((int)SHIPMENT_INTERVAL - critic_eseq[i]);
+
+  for (int i=0; i<rec_non_critic_eseq_length; i++)
+    rec_non_critic_eseq[i] = (int)SHIPMENT_INTERVAL + ((int)SHIPMENT_INTERVAL - non_critic_eseq[i]);
+
+  /* Rearrange rec_critic_eseq */
+  for (int z, j, i=0; i<rec_critic_eseq_length; i++) {
+    while ((j = random(rec_critic_eseq_length))==i);
+    z = rec_critic_eseq[j];
+    rec_critic_eseq[j] = rec_critic_eseq[i];
+    rec_critic_eseq[i] = z;
+  }
+
+  /* Rearrange rec_non_critic_eseq */
+  for (int z, j, i=0; i<rec_non_critic_eseq_length; i++) {
+    while ((j = random(rec_non_critic_eseq_length))==i);
+    z = rec_non_critic_eseq[j];
+    rec_non_critic_eseq[j] = rec_non_critic_eseq[i];
+    rec_non_critic_eseq[i] = z;
+  }
 }
 
 void reset_buff(byte arr[]) {
@@ -425,12 +449,12 @@ void sigfox_check() {
   }
 
   while (!SigFox.begin()) {
+    SigFox.status(); // Clears all pending interrupts
+    SigFox.reset();
     if (++round==5) { // Ensure at least 5 calls
       sched_event(sigfox_check_timer, CHECK_ERROR_COND);
       return;
     }
-    SigFox.status(); // Clears all pending interrupts
-    SigFox.reset();
   }
   sigfox_err = 0;
   disable_timer(sigfox_check_timer);
@@ -514,50 +538,52 @@ int predict_delay(byte eseq) {
 }
 
 
-unsigned long check_interval(unsigned long interval) {
-  if (interval < MIN_SAMPLING_INTERVAL)
+unsigned long check_interval(int interval) {
+  if (interval < (int)MIN_SAMPLING_INTERVAL)
     return (unsigned long)MIN_SAMPLING_INTERVAL;
-  return interval;
+  return (unsigned long)interval;
 }
 
 
 void resched_ship_pol(unsigned long delay) {
 
   byte *index, *rec_index;
-  unsigned long *seq;
+  int *seq;
+  byte seq_length;
 
  // Initially schedule next shipment in (SHIPMENT_INTERVAL - delay) milliseconds
-  sched_shipment(check_interval(SHIPMENT_INTERVAL - delay));
+  sched_shipment(check_interval((int)SHIPMENT_INTERVAL - (int)delay));
 
   if (epol_active()) {
 
     if (new_emergency) {
       seq = critic_eseq;
       index = &critic_eseq_index;
+      seq_length = critic_eseq_length;
       rec_index = &rec_critic_eseq_index;
     }
     else {
       seq = non_critic_eseq;
       index = &non_critic_eseq_index;
+      seq_length = non_critic_eseq_length;
       rec_index = &rec_non_critic_eseq_index;
     }
 
     if ((*rec_index)==-1) {
-      acc_delay = calc_delay();
-      if (acc_delay>0) {
+      if ((acc_delay = calc_delay()) > 0) {
         *rec_index = (*index) -1;
         // delay_eseq = seq;
       }
     }
 
-    if (*index == (sizeof(seq) / sizeof(seq[0]))) {
+    if (*index == seq_length) {
       deact_emergency();
       deact_epol();
-      if (acc_delay>0)
+      if ((acc_delay = calc_delay()) > 0)
         act_rpol();
     }
     else {
-      sched_shipment(check_interval(seq[*index] - delay));
+      sched_shipment(check_interval(seq[*index] - (int)delay));
       (*index)++;
     }
   }
@@ -567,19 +593,20 @@ void resched_ship_pol(unsigned long delay) {
     if ((calc_delay())==0) {
       // rec_interrupted = 0;
       deact_rpol();
-      sched_shipment(SHIPMENT_INTERVAL);
     }
     else {
       if (new_emergency) {
         seq = rec_critic_eseq;
         index = &rec_critic_eseq_index;
+        seq_length = rec_critic_eseq_length;
       }
       else {
         seq = rec_non_critic_eseq;
         index = &rec_non_critic_eseq_index;
+        seq_length = rec_non_critic_eseq_length;
       }
-      sched_shipment(check_interval(seq[*index] - delay));
-      if (++(*index) == (sizeof(seq) / sizeof(seq[0])))
+      sched_shipment(check_interval(seq[*index] - (int)delay));
+      if (++(*index) == seq_length)
         *index = 0;
     }
   }
@@ -772,7 +799,6 @@ void send_measurements() {
   static unsigned long tstamp, temp_tstamp = 0;
   byte msg_type = REPORT_MSG;
   byte payload_format, code;
-  String message;
 
   if (ship_attempt++==0) {
     byte i=0;
@@ -1051,13 +1077,8 @@ void send_measurements() {
 
   /* Shipping... */
 
-  message = String((char)send_buff[0]);
-
-  for (int i=1; i<SHIPMENT_BUFFER_SIZE; i++)
-    message.concat(send_buff[i]);
-
   SigFox.beginPacket();
-  SigFox.print(message);
+  SigFox.write(send_buff, SHIPMENT_BUFFER_SIZE);
 
   if (!downlink_done) code = SigFox.endPacket(true);  // Set Downlink Request by passing true to endPacket()
   else code = SigFox.endPacket();
@@ -1110,15 +1131,10 @@ void send_measurements() {
       tstamp = millis() - tstamp;
 
       if (tstamp <= MAX_RECOVERY_TIME) {
-
-        String message = String((char)rec_matrix[rec_matrix_index][0]);
         write_rec_tstamp(&tstamp);
 
-        for (int j=1; j<SHIPMENT_BUFFER_SIZE; j++)
-          message.concat(rec_matrix[rec_matrix_index][j]);
-
         SigFox.beginPacket();
-        SigFox.print(message);
+        SigFox.write(rec_matrix[rec_matrix_index], SHIPMENT_BUFFER_SIZE);
 
         if (SigFox.endPacket()==0) {  // Send buffer to SIGFOX network
           shipment = millis(); msg++;
@@ -1533,8 +1549,8 @@ void loop() {
         limit_exceeded(LOWER_BPM_MEASURE, bpm);
   }
 
-  ship_timer->Update();
-
+  if (eled_timer->isEnabled())
+    eled_timer->Update();
   if (sigfox_led_timer->isEnabled())
     sigfox_led_timer->Update();
   if (sigfox_check_timer->isEnabled())
@@ -1543,6 +1559,6 @@ void loop() {
     sensors_led_timer->Update();
   if (sensor_check_timer->isEnabled())
     sensor_check_timer->Update();
-  if (eled_timer->isEnabled())
-    eled_timer->Update();
+  
+  ship_timer->Update();
 }
