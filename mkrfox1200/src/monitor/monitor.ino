@@ -83,20 +83,11 @@
 
 #define TEMP_MEASURING_DELAY 1200000 // Minimal delay on milliseconds to send temperature again (20 min)
 
-
 #define EMERG_FLASH 2000  // keep the EMERGENCY_LED 2 seconds flashing on emergency
 #define BUG_FLASH 4000    // keep the SIGFOX_LED||SENSORS_LED 4 seconds flashing on error
 
-
 #define CRITIC_ESEQ_REF 1
 #define NON_CRITIC_ESEQ_REF 2
-
-/*
-#define CRITIC_ESEQ_DURATION 30.0
-#define NON_CRITIC_ESEQ_DURATION 
-#define REC_CRITIC_ESEQ_DURATION 
-#define REC_NON_CRITIC_ESEQ_DURATION
-*/
 
 #define MAX_RECOVERY_MSG 30 // IMPORTANT, DO NOT SET THIS VALUE HIGHER THAN 255.
 #define MAX_RECOVERY_TIME 21600000 // 6 hours
@@ -1071,6 +1062,8 @@ void send_measurements() {
     if (elim) {
       elim_msg = shipment;
       elim = 0;
+      if (emergency_active() && (!epol_active()))
+        deact_emergency();
     }
     
     reset_measures();
