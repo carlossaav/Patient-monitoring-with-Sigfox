@@ -1,6 +1,6 @@
 # Patient's heart rate and temperature monitoring system on ARDUINO MKRFOX1200
 
-![ARDUINO MKRFOX1200](images/cover.jpg)
+![ARDUINO MKRFOX1200](doc/images/cover.jpg)
 
 This project aims to be a monitoring system for aged people based on the ARDUINO MKRFOX1200 board and a couple of sensors atached to it that will monitor heart rate and temperature body measurements. The board will ship a set of metrics based on data recorded by these sensors throug Sigfox's network, which is accesible through its library for this board and an already included data plan. Data will be gathered, buffered and processed on our Monitoring Service, which, in turn, will make them available to the medical team and related people through a web interface. Our Monitoring Service will implement some additional functionalities like notifying an emergency condition to the predefined telephone numbers via Whatssap or SMS systems.
 
@@ -171,4 +171,4 @@ Hence, once you have everything setup on your board and cloned the project, you'
 
 This sketch is set to run about 12-13 minutes by default, making sampling rounds of 1-2 minutes, but you can change it modifying the corresponding constants at the top of the sketch. At about the end of each round, you should see something like this on your Serial Window:
 
-![Serial_Snapshot](images/round_10.jpg)
+![Serial_Snapshot](doc/images/round_10.jpg)
