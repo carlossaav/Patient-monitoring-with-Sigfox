@@ -1,25 +1,10 @@
 #from django.shortcuts import render
 from django.http import HttpResponse, Http404, HttpResponseBadRequest, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
-from sigfox_messages import models, constants
-from datetime import datetime
+from sigfox_messages import models, constants, utils
+# from sigfox_messages.utils import send_message
+import datetime
 import struct
-
-datetime_obj = datetime.now()
-rtc = datetime_obj.strftime("%H:%M:%S")  # hh:mm:ss format
-date = datetime_obj.strftime("%d/%m/%Y") # dd/mm/yy format
-
-
-def get_attr_name(range_id):
-  if range_id == 0:
-    return "lower_range"
-  elif range_id == 1:
-    return "second_range"
-  elif range_id == 2:
-    return "third_range"
-  elif range_id == 3:
-    return "higher_range"
-
 
 def retrieve_field(bin_data, index, length):
 
@@ -41,83 +26,198 @@ def retrieve_temp(bin_data, index, length):
   return struct.unpack('>f', struct.pack(">i", int(temp_bin, 2)))[0]
 
 
-def update_bio(biometrics_24, dev_hist, attr, attr_value):
+def get_attr_name(range_id):
+  if range_id == 0:
+    return "lower_range"
+  elif range_id == 1:
+    return "second_range"
+  elif range_id == 2:
+    return "third_range"
+  elif range_id == 3:
+    return "higher_range"
 
-  # bpm range and some temperature related attributes are set directly
-  if ("range" in attr):
-    range_sum_field = attr + "_sum"
-    setattr(biometrics_24, range_sum_field, attr_value + int(getattr(biometrics_24, range_sum_field)))
-    setattr(biometrics_24, attr, int(getattr(biometrics_24, range_sum_field))/dev_hist.uplink_count)
-  elif ("temp" == attr):
-    biometrics_24.last_temp = attr_value
-    biometrics_24.sum_temp = float(biometrics_24.sum_temp) + attr_value
-    biometrics_24.avg_temp = round((float(biometrics_24.sum_temp)/dev_hist.uplink_count), 3)
 
-    if (dev_hist.uplink_count > 1):
-      if (attr_value < float(biometrics_24.min_temp)):
-        biometrics_24.min_temp = attr_value
-      elif (attr_value > float(biometrics_24.max_temp)):
-        biometrics_24.max_temp = attr_value
-    else:
-      biometrics_24.min_temp = attr_value
-      biometrics_24.max_temp = attr_value
-  elif (dev_hist.uplink_count > 1):
-    if ((attr == "max_bpm") and (attr_value > int(biometrics_24.max_bpm))):
-      biometrics_24.max_bpm = str(attr_value)
-    elif ((attr == "min_bpm") and (attr_value < int(biometrics_24.min_bpm))):
-      biometrics_24.min_bpm = str(attr_value)
-    elif ((attr == "max_ibi") and (attr_value > int(biometrics_24.max_ibi))):
-      biometrics_24.max_ibi = str(attr_value)
-    elif ((attr == "min_ibi") and (attr_value < int(biometrics_24.min_ibi))):
-      biometrics_24.min_ibi = str(attr_value)
+# Substract one day to the given date
+def delta(date):
+
+  dobj = datetime.date(int(date[6:]), int(date[3:5]), int(date[:2]))
+  d = datetime.timedelta(1)
+  dobj = dobj - d
+  date = dobj.strftime("%d/%m/%Y")
+
+  return date
+
+
+def get_sec_diff(datetime_obj, datetime_obj2):
+
+  dojb = datetime_obj - datetime_obj2
+
+  return dobj.seconds
+
+
+def get_bio(dev_hist, bio_24=None, ebio=None):
+
+  if (bio_24 != None):
+    bio = bio_24
+    msg_count = int(dev_hist.uplink_count)
+  elif (ebio != None):
+    bio = ebio
+    msg_count = int(ebio.msg_count)
+  else: # Failed update
+    bio = None
+    msg_count = None
+
+  return bio, msg_count
+
+
+def update_ranges(dev_hist, attr, attr_value, bio_24=None, ebio=None):
+
+  bio, msg_count = get_bio(dev_hist, bio_24, ebio)
+
+  if (bio == None): # Failed update
+    return
+
+  # bpm ranges and related fields are set directly
+  range_sum_field = attr + "_sum"
+  if (msg_count == 1):
+    setattr(bio, range_sum_field, str(attr_value))
+  else:
+    setattr(bio, range_sum_field, str(attr_value + int(getattr(bio, range_sum_field))))
+  setattr(bio, attr, str(int(getattr(bio, range_sum_field))/msg_count))
+
+
+def update_temp(dev_hist, attr, attr_value, bio_24=None, ebio=None):
+
+  bio, msg_count = get_bio(dev_hist, bio_24, ebio)
+
+  if (bio == None): # Failed update
+    return
+
+  # Temperature related attributes are set directly
+  bio.last_temp = str(attr_value)
+
+  if (msg_count > 1):
+    bio.sum_temp = str(float(bio.sum_temp) + attr_value)
+    if (attr_value < float(bio.min_temp)):
+      bio.min_temp = str(attr_value)
+    elif (attr_value > float(bio.max_temp)):
+      bio.max_temp = str(attr_value)
+  else:
+    bio.sum_temp = str(attr_value)
+    bio.min_temp = str(attr_value)
+    bio.max_temp = str(attr_value)
+
+  bio.avg_temp = str(round((float(bio.sum_temp)/msg_count), 3))
+
+
+def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_obj=None, shipment_policy=0):
+
+  bio, msg_count = get_bio(dev_hist, bio_24, ebio)
+
+  if (bio == None): # Failed update
+    return
+
+  if (datetime_obj != None): # on average updates
+    date = datetime_obj.strftime("%d/%m/%Y")
+
+  if (msg_count > 1):
+    if ((attr == "max_bpm") and (attr_value > int(bio.max_bpm))):
+      bio.max_bpm = str(attr_value)
+    elif ((attr == "min_bpm") and (attr_value < int(bio.min_bpm))):
+      bio.min_bpm = str(attr_value)
+    elif ((attr == "max_ibi") and (attr_value > int(bio.max_ibi))):
+      bio.max_ibi = str(attr_value)
+    elif ((attr == "min_ibi") and (attr_value < int(bio.min_ibi))):
+      bio.min_ibi = str(attr_value)
     elif ((attr == "avg_bpm") or (attr == "avg_ibi")):
-      # Since we are on the same date, we can use date var to create datetime_obj2
-      datetime_obj2 = datetime(int(date[6:]), int(date[3:5]), int(date[:2]), int(dev_hist.last_msg_time[:2]), int(dev_hist.last_msg_time[3:5]), int(dev_hist.last_msg_time[6:]))
-      dojb = datetime_obj - datetime_obj2
-      if (dobj.seconds <= constants.MAX_TIME_DELAY):
+
+      if ((ebio != None) and (int(dev_hist.uplink_count)==1)): # (ebio.msg_count > 1), but it's the first message of the day
+        date = delta(date) # Purpose is getting the time of yesterday's last message
+        try:
+          dev_hist = models.Device_History.objects.filter(dev_conf=dev_hist.dev_conf, date=date).get()
+        except models.Device_History.DoesNotExist:
+          return # This should never happen. Catch exception if it does, to continue.
+
+      datetime_obj2 = datetime.datetime(int(date[6:]), int(date[3:5]), int(date[:2]),
+                                        int(dev_hist.last_msg_time[:2]), int(dev_hist.last_msg_time[3:5]),
+                                        int(dev_hist.last_msg_time[6:]))
+      seconds = get_sec_diff(datetime_obj, datetime_obj2)
+
+      if (seconds <= constants.MAX_TIME_DELAY):
         sum_field = "sum_" + attr[4:]
         time_field = attr[4:] + "_time"
-        partial_sum = attr_value * (dobj.seconds * 500) # 500 samples per second
-        setattr(biometrics_24, sum_field, str(int(getattr(biometrics_24, sum_field)) + partial_sum))
-        setattr(biometrics_24, time_field, str(int(getattr(biometrics_24, time_field)) + dobj.seconds))
-        setattr(biometrics_24, attr, str(round(int(getattr(biometrics_24, sum_field))/(int(getattr(biometrics_24, time_field)) * 500))))
+        partial_sum = attr_value * (seconds * 500) # 500 samples per second
+        setattr(bio, sum_field, str(int(getattr(bio, sum_field)) + partial_sum))
+        setattr(bio, time_field, str(int(getattr(bio, time_field)) + seconds))
+        setattr(bio, attr, str(round(int(getattr(bio, sum_field))/(int(getattr(bio, time_field)) * 500))))
       else:
         pass # Lack of continuity upon message delivery. Leave avg_bpm/avg_ibi without updating
   else:
-    # First message of the day
-    setattr(biometrics_24, attr, attr_value)
+    # First message of the day/emergency or both
+    setattr(bio, attr, attr_value)
 
     if ((attr == "avg_bpm") or (attr == "avg_ibi")):
       sum_field = "sum_" + attr[4:]
       time_field = attr[4:] + "_time"
 
-      if (shipment_policy == constants.REGULAR_SHIP_POLICY):
-        setattr(biometrics_24, sum_field, str(attr_value * 630 * 500))
-        setattr(biometrics_24, time_field, str(630)) # regular shipment interval in seconds
-      elif (shipment_policy == constants.RECOVERY_SHIP_POLICY):
-        # Former day passed in the midst of a RECOVERY_SHIP_POLICY
-        dobj = datetime.date(int(date[:2]), int(date[3:5]), int(date[6:]))
-        d = datetime.timedelta(1) # Get time of yesterday's last message
-        dobj = dobj - d
-        date = dobj.strftime("%d/%m/%Y")
-        try:
-          dev_hist = models.Device_History.objects.filter(dev_conf=dev_hist.dev_conf, date=date)
-          datetime_obj2 = datetime(int(date[6:]), int(date[3:5]), int(date[:2]), int(dev_hist.last_msg_time[:2]), int(dev_hist.last_msg_time[3:5]), int(dev_hist.last_msg_time[6:]))
-          dobj = datetime_obj - datetime_obj2
-          if (dobj.seconds <= constants.MAX_TIME_DELAY):
-            setattr(biometrics_24, sum_field, str(attr_value * dobj.seconds * 500))
-            setattr(biometrics_24, time_field, str(dobj.seconds))
-        except models.Device_History.DoesNotExist:
+      # Inititialize sum and time fields
+      setattr(bio, sum_field, str(0))
+      setattr(bio, time_field, str(0))
+
+      if (bio_24 != None):
+        if (shipment_policy == constants.REGULAR_SHIP_POLICY):
+          setattr(bio, sum_field, str(attr_value * 630 * 500))
+          setattr(bio, time_field, str(630)) # regular shipment interval in seconds
+
+        elif (shipment_policy == constants.RECOVERY_SHIP_POLICY):
+          # Former day passed in the midst of a RECOVERY_SHIP_POLICY
+          date = delta(date)
+          try:
+            dev_hist = models.Device_History.objects.filter(dev_conf=dev_hist.dev_conf, date=date).get()
+            datetime_obj2 = datetime.datetime(int(date[6:]), int(date[3:5]), int(date[:2]),
+                                              int(dev_hist.last_msg_time[:2]), int(dev_hist.last_msg_time[3:5]),
+                                              int(dev_hist.last_msg_time[6:]))
+            seconds = get_sec_diff(datetime_obj, datetime_obj2)
+
+            if (seconds <= constants.MAX_TIME_DELAY):
+              setattr(bio, sum_field, str(attr_value * seconds * 500))
+              setattr(bio, time_field, str(seconds))
+            else:
+              pass # Lack of continuity upon message delivery. Leave avg_bpm/avg_ibi without updating
+          except models.Device_History.DoesNotExist:
+            pass
+        else: # EMERGENCY_SHIP_POLICY
+          # We don't have a way to determine how much time the device has been gathering samples since it booted up. We know 'x' falls within 0<x<=10'30", 
+          # range, but we don't know it accurately, so we start measuring device's computing time from the second message onwards to update the 
+          # average(s).
           pass
-      else: # EMERGENCY_SHIP_POLICY
+
+      elif ((ebio != None) and (int(dev_hist.uplink_count) > 1)): # EMERGENCY_SHIP_POLICY; (ebio.msg_count == 1)
+        datetime_obj2 = datetime.datetime(int(date[6:]), int(date[3:5]), int(date[:2]),
+                                          int(dev_hist.last_msg_time[:2]), int(dev_hist.last_msg_time[3:5]),
+                                          int(dev_hist.last_msg_time[6:]))
+        seconds = get_sec_diff(datetime_obj, datetime_obj2)
+
+        if (seconds <= constants.MAX_TIME_DELAY):
+          sum_field = "sum_" + attr[4:]
+          time_field = attr[4:] + "_time"
+          setattr(bio, sum_field, (attr_value * seconds * 500))
+          setattr(bio, time_field, seconds)
+        else:
+          pass # Lack of continuity upon message delivery. Leave fields without updating
+      else:
         # We don't have a way to determine how much time the device has been gathering samples since it booted up. We know 'x' falls within 0<x<=10'30", 
         # range, but we don't know it accurately, so we start measuring device's computing time from the second message onwards to update the 
         # average(s).
         pass
-  
+
 
 @require_GET
 def downlink(request, dev_id):
+
+  datetime_obj = datetime.datetime.now()
+  date = datetime_obj.strftime("%d/%m/%Y") # dd/mm/yy format
+  rtc = datetime_obj.strftime("%H:%M:%S")  # hh:mm:ss format
 
   try:
     dev_conf = models.Device_Config.objects.get(dev_id=dev_id)
@@ -126,10 +226,10 @@ def downlink(request, dev_id):
     raise Http404(output)
 
   try:
-    dev_hist = models.Device_History.objects.filter(dev_conf=dev_conf, date=date)
+    dev_hist = models.Device_History.objects.filter(dev_conf=dev_conf, date=date).get()
   except models.Device_History.DoesNotExist: # Create new history for dev_conf.dev_id device
     dev_hist = models.Device_History(dev_conf=dev_conf, date=date, running_since=rtc,
-                                                    uplink_count=0, downlink_count=0)
+                                                    uplink_count="0", downlink_count="0")
 
   dev_hist.downlink_count = str(int(dev_hist.downlink_count) + 1)
   dev_hist.save()
@@ -157,6 +257,10 @@ def downlink(request, dev_id):
 @require_POST
 def uplink(request):
 
+  datetime_obj = datetime.datetime.now()
+  date = datetime_obj.strftime("%d/%m/%Y") # dd/mm/yy format
+  rtc = datetime_obj.strftime("%H:%M:%S")  # hh:mm:ss format
+
   try:
     dev_conf = models.Device_Config.objects.get(dev_id=request.POST["device"])
     patient = models.Patient.objects.get(dev_conf=dev_conf)
@@ -182,7 +286,7 @@ def uplink(request):
       qs = models.Device_History.objects.filter(dev_conf=dev_conf).order_by("-date")
       if (len(qs) > 1):
         migrate_bio = 1
-        last_date = qs[1].date # Get the latest date when an uplink message was sent prior to this one
+        last_date = qs[1].date # Get the latest date when an uplink message was sent (prior to this one)
   except models.Device_History.DoesNotExist:
     new_hist = 1 # Create a new history entry for the device
     try:
@@ -193,27 +297,44 @@ def uplink(request):
       pass # No messages stored from this device. This is the first one
 
     dev_hist = models.Device_History(dev_conf=dev_conf, date=date, running_since=rtc, last_msg_time=rtc,
-                                                    uplink_count=0, downlink_count=0)
+                                                    uplink_count="0", downlink_count="0")
 
   # Update uplink_count 
   dev_hist.uplink_count = str(int(dev_hist.uplink_count) + 1)
 
+  new_bio_24 = 0
   try:
     biometrics_24 = models.Biometrics_24.objects.get(patient=patient)
   except Biometrics_24.DoesNotExist:
     migrate_bio = 0
-    biometrics_24 = models.Biometrics_24(patient=patient)
+    new_bio_24 = 1
 
   if migrate_bio: # Migrate data on Biometrics_24 to Biometrics
-    models.Biometrics.objects.create(patient=patient, date=last_date, avg_bpm=biometrics_24.avg_bpm, avg_ibi=biometrics_24.avg_ibi, 
-                                     max_bpm=biometrics_24.max_bpm, max_ibi=biometrics_24.max_ibi, min_bpm=biometrics_24.min_bpm,
-                                     min_ibi=biometrics_24.min_ibi, lower_range=biometrics_24.lower_range, second_range=biometrics_24.second_range,
-                                     third_range=biometrics_24.third_range, higher_range=biometrics_24.higher_range, 
-                                     last_temp=biometrics_24.last_temp, avg_temp=biometrics_24.avg_temp, max_temp=biometrics_24.max_temp,
-                                     min_temp=biometrics_24.min_temp, last_alarm_time=biometrics_24.last_alarm_time,
-                                     last_limit_time=biometrics_24.last_limit_time, last_elimit_time=biometrics_24.last_elimit_time)
-    # Following payload data will "reset" Biometrics_24 (first payload to write on it)
-    biometrics_24 = models.Biometrics_24(patient=patient) # new entry
+    new_bio_24 = 1
+    models.Biometrics.objects.create(patient=patient,
+                                     date=last_date,
+                                     avg_bpm=biometrics_24.avg_bpm, 
+                                     avg_ibi=biometrics_24.avg_ibi,
+                                     max_bpm=biometrics_24.max_bpm,
+                                     max_ibi=biometrics_24.max_ibi,
+                                     min_bpm=biometrics_24.min_bpm,
+                                     min_ibi=biometrics_24.min_ibi,
+                                     lower_range=biometrics_24.lower_range,
+                                     second_range=biometrics_24.second_range,
+                                     third_range=biometrics_24.third_range,
+                                     higher_range=biometrics_24.higher_range,
+                                     last_temp=biometrics_24.last_temp,
+                                     avg_temp=biometrics_24.avg_temp,
+                                     max_temp=biometrics_24.max_temp,
+                                     min_temp=biometrics_24.min_temp,
+                                     last_alarm_time=biometrics_24.last_alarm_time,
+                                     last_limit_time=biometrics_24.last_limit_time,
+                                     last_elimit_time=biometrics_24.last_elimit_time)
+
+
+  if new_bio_24: # Following payload data will "reset" Biometrics_24 (first payload to write on it)
+    biometrics_24 = models.Biometrics_24(patient=patient)
+
 
   # Process the payload, update related fields on tables (following Uplink Payload Formats are defined in Readme.md)
   bin_data = bin(int(data, 16))[2:]
@@ -226,59 +347,157 @@ def uplink(request):
   # First 6 fields are common to all payload formats
 
   emergency = retrieve_field(bin_data, 0, 1)                   # emergency field
-  ereason = retrieve_field(bin_data, 1, 1)                     # emergency reason field
+  econd_payload = retrieve_field(bin_data, 1, 1)               # emergency reason field
   shipment_policy = retrieve_field(bin_data, 2, 2)             # shipment_policy field
   msg_type = retrieve_field(bin_data, 4, 3)                    # msg_type field
 
-  if (msg_type==constants.ALARM_MSG):
-    biometrics_24.last_alarm_time = rtc
-  elif (msg_type==constants.LIMITS_MSG):
-    biometrics_24.last_limit_time = rtc
-  elif (msg_type==constants.ALARM_LIMITS_MSG):
-    biometrics_24.last_alarm_time = rtc
-    biometrics_24.last_limit_time = rtc
+  # if emergency:
+      # check emergency already exists on database
+      # if not, create emergency on database, add data to database (Emergency_Biometrics), create attention request
+        # Initiate calling to SMS and Whatssap Systems (background process), do not rely on requests to the Monitor service (uplink view to be executed)
+        # Remember to set Contact.echat_state to ALERTING
+      # else (ongoing emergency)
+        # Merge payload data with Emergency_Biometrics
+        # When emergency ends (device perspective), emergency field equals to 0. i.e next payload will be added to basic Biometrics tables, not to Emergency_Biometrics
+        # Emergency will continue active until someone marks it as attended accessing a URL, or from the web
 
+  emerg_update = 0
+  new_e = 0
+  try:
+    ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_date", "emerg_time")
+    if emergency:
+      if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+        emerg_update = 1
+        if (ebio.active == "No"):
+          seconds = get_sec_diff(datetime_obj, int(ebio.emerg_date[:2]), int(ebio.emerg_date[3:5]),
+                                 int(ebio.emerg_date[6:]), int(ebio.emerg_time[:2]),
+                                 int(ebio.emerg_time[3:5]), int(ebio.emerg_time[6:]))
+          if (seconds <= constants.NEW_EMERG_DELAY):
+            ebio.active = "Yes"
+          else:
+            new_e = 1
+      elif ((shipment_policy == constants.RECOVERY_SHIP_POLICY) and (ebio.active=="No")):
+        # ebio.active = "Yes" # Reactivate emergency
+        # emerg_update = 1
+        # si hacemos esto, se nos complica la diferenciacion entre tramos de emergencia (comprobamos emergencia activa eon este campo)
+        # por otro lado, seria lo suyo darle un sentido al hecho de enviar mensajes de emergencia en rpol. Enviar payload individual por SMS? i.e.?
+        # ebit==1 en medio de rpol ocurre porque salta condicion de emergencia por pulsacion o Elimit, pero se continua en rpol, 
+        # pues se viene de una epol por alguno de esos motivos.
+        pass
+    elif (ebio.active == "Yes"): # emergency == 0
+      ebio.active = "No"
+      emerg_update = 1
+  except models.Emergency_Biometrics.DoesNotExist:
+    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+      new_e = 1
+      emerg_update = 1
+
+  try:
+    latitude, longitude = request.POST["geolocation"]
+    # location = google_maps call (i.e "Calle San Juan, Zamora") // Consultar que posibilidades ofrece el API
+    # No llamar al API cada vez que recibes un mensaje (demasiadas llamadas). Hacerlo bien cuando cambien las coordenadas(implica almacenar coordenadas y comparar # las recibidas con las almacenadas) o consultar cada cierto tiempo (1 vez cada 20 minutos en condiciones normales y una cada 5' en emergencias, por ejemplo)
+    dev_hist.last_known_location = location
+  except KeyError:
+    latitude, longitude = (-1, -1)
+
+  if new_e: # create new emergency, Attention request
+    ebio = models.Emergency_Biometrics(patient=patient, emerg_date=date, emerg_time=rtc,
+                                       msg_count="0", active="Yes")
+    att_req = models.Attention_request.objects.create(emergency=ebio, patient=patient, request_date=date,
+                                                      request_time=rtc, request_type="Emergency",
+                                                      request_state="Processing")
+    models.Doctor_Request.objects.create(attention_request=att_req, patient=patient, doctor=patient.doctor,
+                                         request_state="Pending")
+
+    # Remember to set Contact.echat_state to ALERTING
+    # Initiate calling to SMS and Whatssap Systems (background process?)
+
+
+
+  if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+    ebio.msg_count = str(int(ebio.msg_count) + 1)
+
+
+  # Update biometrics timestamps
+  if (msg_type == constants.ALARM_MSG):
+    biometrics_24.last_alarm_time = rtc
+  elif (msg_type == constants.LIMITS_MSG):
+    biometrics_24.last_limit_time = rtc
+  elif (msg_type == constants.ALARM_LIMITS_MSG):
+    biometrics_24.last_alarm_time = rtc
+    biometrics_24.last_limit_time = rtc
 
   # Retrieve format bits from rpv field
   payload_format = bin_data[10] + bin_data[21] + bin_data[32]  # payload format
   payload_format = int(payload_format, 2)
+
+  avg_bpm = 0
+  avg_ibi = 0
+  max_bpm = 0
+  max_ibi = 0
+  min_bpm = 0
+  min_ibi = 0
+  lower_range = 0
+  second_range = 0
+  third_range = 0
+  higher_range = 0
+  temp = 0.0
+  elapsed_ms = 0
 
   if (payload_format != 4): # Retrieve range ids and percentages
     l = []
     ibit = 7
     per_sum = 0
     counter = 0
+    p = [0, 0, 0, 0]
     while (counter != 3):
       range_id = retrieve_field(bin_data, ibit, 3)
       percentage = retrieve_field(bin_data, ibit+4, 7)
       range_name = get_attr_name(range_id)
-      update_bio(biometrics_24, dev_hist, range_name, percentage)
+      update_ranges(dev_hist, range_name, percentage, biometrics_24, None)
+      if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+        update_ranges(dev_hist, range_name, percentage, None, ebio)
       l.append(range_id)
       per_sum += percentage
       ibit += 11
       counter += 1
+      if (range_id in range(4)):
+        p[range_id] = percentage
 
-    z = [0, 1, 2, 3]
-    for r_id in z:
+    for r_id in range(4):
       if r_id not in l:
         excluded_id = r_id
         break
 
     excluded_percentage = (100 - per_sum)
     range_name = get_attr_name(excluded_id)
-    update_bio(biometrics_24, dev_hist, range_name, excluded_percentage)
+    update_ranges(dev_hist, range_name, excluded_percentage, biometrics_24, None)
+    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+      update_ranges(dev_hist, range_name, excluded_percentage, None, ebio)
+    
+    if (excluded_id in range(4)):
+      p[excluded_id] = excluded_percentage
+    
+    lower_range = p[0]
+    second_range = p[1]
+    third_range = p[2]
+    higher_range = p[3]
 
     avg_bpm = retrieve_field(bin_data, 40, 8)                    # Average Beats Per Minute
-    update_bio(biometrics_24, dev_hist, "avg_bpm", avg_bpm)
-
+    update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None, datetime_obj, shipment_policy)
+    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+      update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, None, ebio, datetime_obj, shipment_policy)
 
   # Next fields vary depending on which payload_format we're dealing with
 
   if (payload_format==0 or payload_format==1 or payload_format==5):
     max_bpm = retrieve_field(bin_data, 48, 8)                  # Highest record of Beats Per Minute
     min_bpm = retrieve_field(bin_data, 56, 8)                  # Lowest record of Beats Per Minute
-    update_bio(biometrics_24, dev_hist, "max_bpm", max_bpm)
-    update_bio(biometrics_24, dev_hist, "min_bpm", min_bpm)
+    update_bpm_ibi(dev_hist, "max_bpm", max_bpm, biometrics_24, None)
+    update_bpm_ibi(dev_hist, "min_bpm", min_bpm, biometrics_24, None)
+    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+      update_bpm_ibi(dev_hist, "max_bpm", max_bpm, None, ebio)
+      update_bpm_ibi(dev_hist, "min_bpm", min_bpm, None, ebio)
 
     if ((max_bpm > dev_conf.higher_ebpm_limit) or (min_bpm < dev_conf.lower_ebpm_limit)):
       biometrics_24.last_elimit_time = rtc
@@ -288,21 +507,62 @@ def uplink(request):
       temp = retrieve_temp(bin_data, 48, 32)                    # Retrieve Temperature
     else:
       temp = retrieve_temp(bin_data, 64, 32)
-    update_bio(biometrics_24, dev_hist, "temp", temp)
+    update_temp(dev_hist, "temp", temp, biometrics_24, None)
+    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+      update_temp(dev_hist, "temp", temp, None, ebio)
 
   if (payload_format==2 or payload_format==3 or payload_format==6):
     avg_ibi = retrieve_field(bin_data, 48, 16)                 # Average InterBeat Interval
-    update_bio(biometrics_24, dev_hist, "avg_ibi", avg_ibi)
+    update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, biometrics_24, None, datetime_obj, shipment_policy)
+    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+      update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, None, ebio, datetime_obj, shipment_policy)
 
   if (payload_format==1 or payload_format==3 or payload_format==5 or payload_format==6):
     max_ibi = retrieve_field(bin_data, 64, 16)                 # Highest record of Interbeat interval
     min_ibi = retrieve_field(bin_data, 80, 16)                 # Lowest record of Interbeat interval
-    update_bio(biometrics_24, dev_hist, "max_ibi", max_ibi)
-    update_bio(biometrics_24, dev_hist, "min_ibi", min_ibi)
+    update_bpm_ibi(dev_hist, "max_ibi", max_ibi, biometrics_24, None)
+    update_bpm_ibi(dev_hist, "min_ibi", min_ibi, biometrics_24, None)
+    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+      update_bpm_ibi(dev_hist, "max_ibi", max_ibi, None, ebio)
+      update_bpm_ibi(dev_hist, "min_ibi", min_ibi, None, ebio)
 
   if (payload_format == 7):
     elapsed_ms = retrieve_field(bin_data, 64, 32)              # Elapsed milliseconds since the recovery message was stored
 
+
+  if (shipment_policy == constants.EMERGENCY_SHIP_POLICY): # Add individual payload fields to Emergency_Payload table
+    if econd_payload:
+      econd = "Yes"
+    else:
+      econd = "No"
+
+    if (msg_type == constants.ALARM_MSG):
+      m_type = "ALARM_MSG"
+    elif (msg_type == constants.LIMITS_MSG):
+      m_type = "LIMITS_MSG"
+    elif (msg_type == constants.ALARM_LIMITS_MSG):
+      m_type = "ALARM_LIMITS_MSG"
+    elif (msg_type == constants.ERROR_MSG):
+      m_type = "ERROR_MSG"
+    elif (msg_type == constants.REC_ALARM_MSG):
+      m_type = "REC_ALARM_MSG"
+    elif (msg_type == constants.REC_LIMITS_MSG):
+      m_type = "REC_LIMITS_MSG"
+    elif (msg_type == constants.REC_ALARM_LIMITS_MSG):
+      m_type = "REC_ALARM_LIMITS_MSG"
+    elif (msg_type == constants.REPORT_MSG):
+      m_type = "REPORT_MSG"
+
+    epayload = models.Emergency_Payload.objects.create(ebio=ebio, econd_payload=econd,
+                                                       msg_type=m_type, payload_format=payload_format,
+                                                       avg_bpm=avg_bpm, avg_ibi=avg_ibi,
+                                                       max_bpm=max_bpm, max_ibi=max_ibi,
+                                                       min_bpm=min_bpm, min_ibi=min_ibi,
+                                                       lower_range=lower_range,
+                                                       second_range=second_range,
+                                                       third_range=third_range,
+                                                       higher_range=higher_range,
+                                                       temp=temp, elapsed_ms=elapsed_ms)
 
   # Update dev_hist fields
   dev_hist.last_msg_time = rtc
@@ -313,25 +573,10 @@ def uplink(request):
     else:
       dev_hist.last_dev_state = "Temperature sensor error"
 
-  # if emergency:
-      # check emergency already exists on database
-      # if not, create emergency on database, add data to database (Emergency_Biometrics), create attention request
-        # Initiate calling to SMS and Whatssap Systems (background process), do not rely on requests to the Monitor service (uplink view to be executed)
-      # else (ongoing emergency)
-        # Merge payload data with Emergency_Biometrics
-        # When emergency ends (device perspective), emergency field equals to 0. i.e next payload will be added to basic Biometrics tables, not to Emergency_Biometrics
-        # Emergency will continue active until someone marks it as attended accessing a URL, or from the web
-
-  try:
-    latitude, longitude = request.POST["geolocation"]
-    # location = google_maps call (i.e "Calle San Juan, Zamora") // Consultar que posibilidades ofrece el API
-    # No llamar al API cada vez que recibes un mensaje (demasiadas llamadas). Hacerlo bien cuando cambien las coordenadas(implica almacenar coordenadas y comparar # las recibidas con las almacenadas) o consultar cada cierto tiempo (1 vez cada 20 minutos en condiciones normales y una cada 5' en emergencias, por ejemplo)
-    dev_hist.last_known_location = location
-  except KeyError:
-    latitude, longitude = (-1, -1)
-
   dev_hist.save()
   biometrics_24.save()
+  if emerg_update:
+    ebio.save()
   if new_hist:
     models.Patient_Device_History.objects.create(dev_hist=dev_hist, patient=patient)
 
