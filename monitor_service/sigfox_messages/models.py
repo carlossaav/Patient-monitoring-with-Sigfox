@@ -19,6 +19,8 @@ class Device_History(models.Model):
   running_since = models.CharField(max_length=8) # hh:mm:ss format
   last_msg_time = models.CharField(max_length=8) # hh:mm:ss format
   last_dev_state = models.CharField(max_length=25)
+  last_known_latitude = models.CharField(max_length=25)
+  last_known_longitude = models.CharField(max_length=25)
   last_known_loc = models.CharField(max_length=50)
   uplink_count = models.CharField(max_length=3)
   downlink_count = models.CharField(max_length=3)
@@ -48,8 +50,9 @@ class Contact(models.Model):
   echat_id = models.CharField(max_length=50, primary_key=True)
   chat_username = models.CharField(max_length=50) # Chat's username
   echat_state = models.CharField(max_length=50) # Chat's state
-  etelephone = models.CharField(max_length=50) # For SMS contact
+  phone_number = models.CharField(max_length=50) # For SMS contact
   sms_alerts = models.CharField(max_length=3)  # ("Yes/No")
+  comm_status = models.CharField(max_length=25) # Emergency notification 'state' ("No emergencies"/"Notifying"/"Received")
 
 
 class Patient_Contact(models.Model):
@@ -131,8 +134,7 @@ class Attention_request(models.Model):
   request_date = models.CharField(max_length=10) # dd/mm/yy format
   request_time = models.CharField(max_length=8) # hh:mm:ss format
   request_type = models.CharField(max_length=25)
-  communication_status = models.CharField(max_length=25) # ("Processing/Notified(SMS/Whatsssap)/Received(SMS/Whatsssap; i.e. one or more users have
-  # accesed provided URL(s) from their telephones/Communication Finished")
+  status = models.CharField(max_length=25) # ("Ongoing"/"Attended")
 #  emerg_state = models.CharField(max_length=25)
 
 

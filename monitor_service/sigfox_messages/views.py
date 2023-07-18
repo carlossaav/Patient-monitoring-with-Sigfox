@@ -1,8 +1,11 @@
 #from django.shortcuts import render
 from django.http import HttpResponse, Http404, HttpResponseBadRequest, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
-from sigfox_messages import models, constants, utils
-# from sigfox_messages.utils import send_message
+from sigfox_messages import models, constants
+from sigfox_messages.utils import send_message, send_location
+# from threading import Thread
+from multiprocessing import Process
+import asyncio
 import datetime
 import struct
 
@@ -187,9 +190,9 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
           except models.Device_History.DoesNotExist:
             pass
         else: # EMERGENCY_SHIP_POLICY
-          # We don't have a way to determine how much time the device has been gathering samples since it booted up. We know 'x' falls within 0<x<=10'30", 
-          # range, but we don't know it accurately, so we start measuring device's computing time from the second message onwards to update the 
-          # average(s).
+          # We don't have a way to determine how much time the device has been gathering samples since it booted up.
+          # We know 'x' falls within 0<x<=10'30", range, but we don't know it accurately, so we start measuring device's
+          # computing time from the second message onwards to update the average(s).
           pass
 
       elif ((ebio != None) and (int(dev_hist.uplink_count) > 1)): # EMERGENCY_SHIP_POLICY; (ebio.msg_count == 1)
@@ -206,9 +209,9 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
         else:
           pass # Lack of continuity upon message delivery. Leave fields without updating
       else:
-        # We don't have a way to determine how much time the device has been gathering samples since it booted up. We know 'x' falls within 0<x<=10'30", 
-        # range, but we don't know it accurately, so we start measuring device's computing time from the second message onwards to update the 
-        # average(s).
+        # We don't have a way to determine how much time the device has been gathering samples since it booted up.
+        # We know 'x' falls within 0<x<=10'30", range, but we don't know it accurately, so we start measuring device's
+        # computing time from the second message onwards to update the average(s).
         pass
 
 
@@ -254,6 +257,63 @@ def downlink(request, dev_id):
   return JsonResponse({dev_id: {"downlinkData": payload}})
 
 
+
+async def notify_contact(pcontact, att_req):
+
+  # Update pcontact.contact fields
+  pcontact.contact.echat_state = "ALERTING"
+  pcontact.contact.comm_status = "Notifying"
+  await pcontact.asave()
+  # await pcontact.contact.asave()
+
+  message = "---AUTOMATED EMERGENCY NOTIFICATION---\n\nHello, we send you this message because monitor device, "
+  message += "from patient " + pcontact.patient.name + " " + pcontact.patient.surname + ", spotted an emergency "
+  message += "condition.\nPlease issue '/stop' command to let us know that you are aware of the situation. "
+  message += "You can visit https://www.com/sigfox_messages/ to get the latest biometrics from this patient.\n\n"
+  message += "---AUTOMATED EMERGENCY NOTIFICATION---"
+
+  for e in range(1, 5): # send 4 initial notifications
+    await send_message(pcontact.contact.echat_id, message)
+    await asyncio.sleep(3)
+
+  async def send_loc(contact):
+
+    loc_avail = 0
+    if (contact.last_known_latitude == ""
+        or contact.last_known_longitude == ""):
+      loc_msg = "Last patient's location not available on Database.\n"
+    else:
+      loc_avail = 1
+      loc_msg = "Last known patient's location:\n"
+
+    await send_message(contact.echat_id, loc_msg)
+    if loc_avail: # Last location available
+      await send_location(contact.echat_id, contact.last_known_latitude,
+                          contact.last_known_longitude)
+
+  await send_loc(pcontact.contact)
+
+  if pcontact.contact.sms_alerts == "Yes":
+    # Just send one SMS alert
+    pass
+
+  await asyncio.sleep(10)
+  while 1:
+    try:
+      contact = models.Contact.objects.get(echat_id=pcontact.contact.echat_id)
+      att_req = models.Attention_request.objects.get(id=att_req.id)
+      if ((contact.comm_status == "Received") or
+          (att_req.status == "Attended")):
+        return
+      await send_message(contact.echat_id, message)
+      await send_loc(contact)
+      await asyncio.sleep(30)
+    except models.Contact.DoesNotExist:
+      return
+    except models.Attention_request.DoesNotExist:
+      return
+
+
 @require_POST
 def uplink(request):
 
@@ -281,7 +341,8 @@ def uplink(request):
   new_hist = 0
   migrate_bio = 0
   try:
-    dev_hist = models.Device_History.objects.get(dev_conf=dev_conf, date=date) # Should return a single instance or nothing (exception)
+    # Should return a single instance or nothing (exception)
+    dev_hist = models.Device_History.objects.get(dev_conf=dev_conf, date=date)
     if (int(dev_hist.uplink_count) == 0):
       qs = models.Device_History.objects.filter(dev_conf=dev_conf).order_by("-date")
       if (len(qs) > 1):
@@ -394,24 +455,38 @@ def uplink(request):
 
   try:
     latitude, longitude = request.POST["geolocation"]
+
+    dev_hist.last_known_latitude = str(latitude)
+    dev_hist.last_known_longitude = str(longitude)
+
     # location = google_maps call (i.e "Calle San Juan, Zamora") // Consultar que posibilidades ofrece el API
     # No llamar al API cada vez que recibes un mensaje (demasiadas llamadas). Hacerlo bien cuando cambien las coordenadas(implica almacenar coordenadas y comparar # las recibidas con las almacenadas) o consultar cada cierto tiempo (1 vez cada 20 minutos en condiciones normales y una cada 5' en emergencias, por ejemplo)
-    dev_hist.last_known_location = location
+    dev_hist.last_known_location = str(location)
+    dev_hist.save()
   except KeyError:
-    latitude, longitude = (-1, -1)
+    pass  # Do not update latitude/longitude/location 
+
 
   if new_e: # create new emergency, Attention request
     ebio = models.Emergency_Biometrics(patient=patient, emerg_date=date, emerg_time=rtc,
                                        msg_count="0", active="Yes")
     att_req = models.Attention_request.objects.create(emergency=ebio, patient=patient, request_date=date,
                                                       request_time=rtc, request_type="Emergency",
-                                                      request_state="Processing")
+                                                      request_state="Ongoing")
     models.Doctor_Request.objects.create(attention_request=att_req, patient=patient, doctor=patient.doctor,
                                          request_state="Pending")
 
-    # Remember to set Contact.echat_state to ALERTING
-    # Initiate calling to SMS and Whatssap Systems (background process?)
+    def notifier(pcontact, att_req):
 
+      async def notify():
+        async for pcontact in models.Patient_Contact.objects.filter(patient=patient):
+          task = asyncio.create_task(notify_contact(pcontact, att_req))
+          await task
+
+      asyncio.run(notify)
+
+    p = Process(target=notifier, args=(pcontact, att_req))
+    p.start()
 
 
   if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
