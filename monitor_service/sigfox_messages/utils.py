@@ -15,8 +15,8 @@ bot = AsyncTeleBot(token_id)
 
 goodbye_msg = "Thanks for using Monitor Service."
 help_message = "Please issue '/help' command to get interactive help"
-stop_broadcast_msg = """In order to interact with me, you must first stop alert broadcasting to this phone, so this emergency can be 
-marked as "Received", so please issue '/stop' command"""
+stop_broadcast_msg = "In order to interact with me, you must first stop alert broadcasting to this phone, "
+stop_broadcast_msg += "so this emergency can be marked as 'Received', so please issue '/stop' command"
 
 help_list = """
 
@@ -51,25 +51,25 @@ wait_name_dict = {}
 wait_del_dict = {}
 wait_unfollow_dict = {}
 
-def no_filter(contact):
-  return contact.patient_contact_set.all()
 
 def my_get_attr(obj, attr):
   return getattr(obj, attr)
 
-async_no_filter = sync_to_async(no_filter, thread_sensitive=True)
+def my_set_attr(obj, attr, attr_value):
+  return setattr(obj, attr, attr_value)
+
 async_my_get_attr = sync_to_async(my_get_attr, thread_sensitive=True)
-
-async_Patient_Contact_filter = sync_to_async(models.Patient_Contact.objects.filter, thread_sensitive=True)
-async_Att_request_filter = sync_to_async(models.Attention_request.objects.filter, thread_sensitive=True)
-
+async_my_set_attr = sync_to_async(my_set_attr, thread_sensitive=True)
 
 async def send_message(echat_id, text):
   await bot.send_message(echat_id, text)
 
-
 async def send_location(echat_id, latitude, longitude):
   await bot.send_location(echat_id, latitude, longitude)
+
+async_Patient_Contact_filter = sync_to_async(models.Patient_Contact.objects.filter, thread_sensitive=True)
+async_Device_History_filter = sync_to_async(models.Device_History.objects.filter, thread_sensitive=True)
+async_Emergency_Payload_filter = sync_to_async(models.Emergency_Payload.objects.filter, thread_sensitive=True)
 
 
 @bot.message_handler(commands=["stop"])
@@ -90,7 +90,7 @@ async def handle_stop_command(message):
   contact.comm_status = "Received" # Set notification as seen (Received)
   contact.echat_state = SPAWN_CONFIG
   await contact.asave()
-  reply = "----ALERT SYSTEM STOPPED----\n\n.You won't receive more updates of the emergency on this phone. "
+  reply = "---ALERT SYSTEM STOPPED---\n"
   reply += "If you want to get the latest patient biometrics, visit https://www.com/patient_monitor"
 
   await bot.reply_to(message, reply)
@@ -528,13 +528,6 @@ async def config(message):
 
   await bot.reply_to(message, reply)
 
-
-
-#@bot.message_handler(func=test_message)
-#@bot.message_handler(func=lambda message: message.content_type != "text")
-
-#def test_message(message):
- # return message.content_type != "text"
 
 content_types = ["audio, document", "photo", "sticker", "video", "video_note", "voice"
                  "location", "new_chat_members", "left_chat_member", "new_chat_title",

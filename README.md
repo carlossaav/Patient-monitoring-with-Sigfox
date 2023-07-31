@@ -128,9 +128,9 @@ Our ArduinoMKRFOX1200 patient monitoring program will deliver messages to the Si
 
 - Shipment policy bits (**p field**):
 
-* 00: No policies active. Regular shipment rate
-* 01: Emergency shipment policy is active
-* 10: Recovery shipment policy is active
+* **00**: No policies active. Regular shipment rate
+* **01**: Emergency shipment policy is active
+* **10**: Recovery shipment policy is active
 
 - Message type (**msg field**): Indicates the message type of the payload.
 

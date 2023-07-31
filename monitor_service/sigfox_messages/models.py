@@ -96,17 +96,17 @@ class Emergency_Biometrics(models.Model):
   higher_range = models.CharField(max_length=3)
   higher_range_sum = models.CharField(max_length=25)
 
-  last_temp = models.CharField(max_length=4)
-  sum_temp = models.CharField(max_length=10)
-  avg_temp = models.CharField(max_length=4)
-  max_temp = models.CharField(max_length=4)
-  min_temp = models.CharField(max_length=4)
+  last_temp = models.CharField(max_length=6)
+  sum_temp = models.CharField(max_length=15)
+  avg_temp = models.CharField(max_length=6)
+  max_temp = models.CharField(max_length=6)
+  min_temp = models.CharField(max_length=6)
 
 
 class Emergency_Payload(models.Model):
 
   emergency = models.ForeignKey(Emergency_Biometrics, on_delete=models.CASCADE)
-  econd_payload = models.CharField(max_length=3) # payload where an emergency condition was detected ("Yes/No")
+  ereason_payload = models.CharField(max_length=3) # payload where an emergency condition was detected ("Yes/No")
   msg_type = models.CharField(max_length=25)
   payload_format = models.CharField(max_length=1)
 
@@ -122,7 +122,7 @@ class Emergency_Payload(models.Model):
   third_range = models.CharField(max_length=3)
   higher_range = models.CharField(max_length=3)
 
-  temp = models.CharField(max_length=5)
+  temp = models.CharField(max_length=15)
   elapsed_ms = models.CharField(max_length=50)
 
 
@@ -163,10 +163,10 @@ class Biometrics(models.Model):
   third_range = models.CharField(max_length=3)
   higher_range = models.CharField(max_length=3)
 
-  last_temp = models.CharField(max_length=4)
-  avg_temp = models.CharField(max_length=4)
-  max_temp = models.CharField(max_length=4)
-  min_temp = models.CharField(max_length=4)
+  last_temp = models.CharField(max_length=6)
+  avg_temp = models.CharField(max_length=6)
+  max_temp = models.CharField(max_length=6)
+  min_temp = models.CharField(max_length=6)
 
   last_alarm_time = models.CharField(max_length=8) # hh:mm:ss format
   last_limit_time = models.CharField(max_length=8)
@@ -199,11 +199,11 @@ class Biometrics_24(models.Model):
   higher_range = models.CharField(max_length=3)
   higher_range_sum = models.CharField(max_length=25)
 
-  last_temp = models.CharField(max_length=5)
-  sum_temp = models.CharField(max_length=10)
-  avg_temp = models.CharField(max_length=5)
-  max_temp = models.CharField(max_length=5)
-  min_temp = models.CharField(max_length=5)
+  last_temp = models.CharField(max_length=6)
+  sum_temp = models.CharField(max_length=15)
+  avg_temp = models.CharField(max_length=6)
+  max_temp = models.CharField(max_length=6)
+  min_temp = models.CharField(max_length=6)
 
   last_alarm_time = models.CharField(max_length=8) # hh:mm:ss format
   last_limit_time = models.CharField(max_length=8)
