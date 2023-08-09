@@ -52,7 +52,7 @@ class Contact(models.Model):
   echat_state = models.CharField(max_length=50) # Chat's state
   phone_number = models.CharField(max_length=50) # For SMS contact
   sms_alerts = models.CharField(max_length=3)  # ("Yes/No")
-  comm_status = models.CharField(max_length=25) # Emergency notification 'state' ("No emergencies"/"Notifying"/"Received")
+  # comm_status = models.CharField(max_length=25) # Emergency notification 'state' ("No emergencies"/"Notifying"/"Received")
 
 
 class Patient_Contact(models.Model):
@@ -87,13 +87,13 @@ class Emergency_Biometrics(models.Model):
   min_bpm = models.CharField(max_length=3)
   min_ibi = models.CharField(max_length=5)
 
-  lower_range = models.CharField(max_length=3) # 0.yz format (percentage)
+  lower_range = models.CharField(max_length=5)
   lower_range_sum = models.CharField(max_length=25)
-  second_range = models.CharField(max_length=3)
+  second_range = models.CharField(max_length=5)
   second_range_sum = models.CharField(max_length=25)
-  third_range = models.CharField(max_length=3)
+  third_range = models.CharField(max_length=5)
   third_range_sum = models.CharField(max_length=25)
-  higher_range = models.CharField(max_length=3)
+  higher_range = models.CharField(max_length=5)
   higher_range_sum = models.CharField(max_length=25)
 
   last_temp = models.CharField(max_length=6)
@@ -117,10 +117,10 @@ class Emergency_Payload(models.Model):
   min_bpm = models.CharField(max_length=3)
   min_ibi = models.CharField(max_length=5)
 
-  lower_range = models.CharField(max_length=3)
-  second_range = models.CharField(max_length=3)
-  third_range = models.CharField(max_length=3)
-  higher_range = models.CharField(max_length=3)
+  lower_range = models.CharField(max_length=5)
+  second_range = models.CharField(max_length=5)
+  third_range = models.CharField(max_length=5)
+  higher_range = models.CharField(max_length=5)
 
   temp = models.CharField(max_length=15)
   elapsed_ms = models.CharField(max_length=50)
@@ -158,10 +158,10 @@ class Biometrics(models.Model):
   min_bpm = models.CharField(max_length=3)
   min_ibi = models.CharField(max_length=5)
 
-  lower_range = models.CharField(max_length=3)
-  second_range = models.CharField(max_length=3)
-  third_range = models.CharField(max_length=3)
-  higher_range = models.CharField(max_length=3)
+  lower_range = models.CharField(max_length=5)
+  second_range = models.CharField(max_length=5)
+  third_range = models.CharField(max_length=5)
+  higher_range = models.CharField(max_length=5)
 
   last_temp = models.CharField(max_length=6)
   avg_temp = models.CharField(max_length=6)
@@ -190,13 +190,13 @@ class Biometrics_24(models.Model):
   min_bpm = models.CharField(max_length=3)
   min_ibi = models.CharField(max_length=5)
 
-  lower_range = models.CharField(max_length=3) # 0.yz format (percentage)
+  lower_range = models.CharField(max_length=5)
   lower_range_sum = models.CharField(max_length=25)
-  second_range = models.CharField(max_length=3)
+  second_range = models.CharField(max_length=5)
   second_range_sum = models.CharField(max_length=25)
-  third_range = models.CharField(max_length=3)
+  third_range = models.CharField(max_length=5)
   third_range_sum = models.CharField(max_length=25)
-  higher_range = models.CharField(max_length=3)
+  higher_range = models.CharField(max_length=5)
   higher_range_sum = models.CharField(max_length=25)
 
   last_temp = models.CharField(max_length=6)

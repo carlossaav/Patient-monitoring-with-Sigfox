@@ -15,8 +15,8 @@ bot = AsyncTeleBot(token_id)
 
 goodbye_msg = "Thanks for using Monitor Service."
 help_message = "Please issue '/help' command to get interactive help"
-stop_broadcast_msg = "In order to interact with me, you must first stop alert broadcasting to this phone, "
-stop_broadcast_msg += "so this emergency can be marked as 'Received', so please issue '/stop' command"
+stop_broadcast_msg = "In order to interact with me, you must first stop alert broadcasting to this phone "
+stop_broadcast_msg += "for the current emergencies to be marked as 'Received', so please issue '/stop' command"
 
 help_list = """
 
@@ -87,7 +87,6 @@ async def handle_stop_command(message):
     await bot.reply_to(message, "Nothing to stop. " + help_message)
     return
 
-  contact.comm_status = "Received" # Set notification as seen (Received)
   contact.echat_state = SPAWN_CONFIG
   await contact.asave()
   reply = "---ALERT SYSTEM STOPPED---\n"
@@ -127,8 +126,7 @@ async def init_dialogue(message):
     contact = await models.Contact.objects.aget(echat_id=message.chat.id)
   except models.Contact.DoesNotExist:
     contact = await models.Contact.objects.acreate(echat_id=message.chat.id, chat_username=message.from_user.first_name,
-                                                   echat_state=SPAWN_CONFIG, phone_number="", sms_alerts="No",
-                                                   comm_status="No emergencies")
+                                                   echat_state=SPAWN_CONFIG, phone_number="", sms_alerts="No")
 
   markup = None
   if (contact.echat_state in input_states[:8]):
@@ -514,11 +512,12 @@ async def config(message):
       func, command = operations[message.text]
       reply = "Performing " + command + " command..."
       await bot.reply_to(message, reply)
-      message = message
-      message.text = command
-      contact.echat_state = SPAWN_CONFIG
-      await contact.asave()
-      await func(message)
+      if (message.text != '9'):  # Keep WAIT_HELP_OPTION chat state on '/exit' command
+        contact.echat_state = SPAWN_CONFIG
+        await contact.asave()
+      msg = message
+      msg.text = command
+      await func(msg)
       return
     else:
       reply = "Please provide a correct operation number or related command: "

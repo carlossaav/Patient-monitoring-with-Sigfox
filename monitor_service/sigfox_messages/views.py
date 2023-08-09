@@ -85,10 +85,11 @@ def update_ranges(dev_hist, attr, attr_value, bio_24=None, ebio=None):
   range_sum_field = attr + "_sum"
   # print(f"(uplink) range_sum_field = {range_sum_field}")
   if ((msg_count == 1) or (getattr(bio, range_sum_field) == "")):
-    setattr(bio, range_sum_field, str(attr_value))
+    setattr(bio, range_sum_field, str(float(attr_value)))
+    setattr(bio, attr, str(float(attr_value)))
   else:
-    setattr(bio, range_sum_field, str(attr_value + int(getattr(bio, range_sum_field))))
-  setattr(bio, attr, str(round(int(getattr(bio, range_sum_field))/msg_count)))
+    setattr(bio, range_sum_field, str(float(attr_value) + float(getattr(bio, range_sum_field))))
+    setattr(bio, attr, str(round(float(getattr(bio, range_sum_field))/float(msg_count), 2)))
 
 
 def update_temp(dev_hist, attr_value, bio_24=None, ebio=None):
@@ -103,7 +104,7 @@ def update_temp(dev_hist, attr_value, bio_24=None, ebio=None):
 
   # On the next if, pick up any temperature field to check out that these fields have already
   # been initialized (msg_count > 1, but an ERROR_MSG message due to Temperature sensor error
-  # was sent prior to this one, so temperature fields may equal to "")
+  # could have been sent prior to this one, so temperature fields may equal to "")
   if ((msg_count > 1) and (bio.sum_temp != "")):
     bio.sum_temp = str(round((float(bio.sum_temp) + attr_value), 3))
     if (attr_value < float(bio.min_temp)):
@@ -187,6 +188,8 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
 
         elif (shipment_policy == constants.RECOVERY_SHIP_POLICY):
           # Former day passed in the midst of a RECOVERY_SHIP_POLICY
+          # We know this because any device's first message is always either within
+          # an EMERGENCY_SHIP_POLICY or a REGULAR_SHIP_POLICY.
           date = delta(date)
           try:
             dev_hist = models.Device_History.objects.filter(dev_conf=dev_hist.dev_conf, date=date).get()
@@ -208,15 +211,13 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
           # computing time from the second message onwards to update the average(s).
           pass
 
-      elif ((ebio != None) and (int(dev_hist.uplink_count) > 1)): # EMERGENCY_SHIP_POLICY; (ebio.emsg_count == 1)
+      elif ((ebio != None) and (int(dev_hist.uplink_count) > 1)): # (ebio.emsg_count == 1)
         datetime_obj2 = datetime.datetime(int(date[6:]), int(date[3:5]), int(date[:2]),
                                           int(dev_hist.last_msg_time[:2]), int(dev_hist.last_msg_time[3:5]),
                                           int(dev_hist.last_msg_time[6:]))
         seconds = get_sec_diff(datetime_obj, datetime_obj2)
 
         if (seconds <= constants.MAX_TIME_DELAY):
-          sum_field = "sum_" + attr[4:]
-          time_field = attr[4:] + "_time"
           setattr(bio, sum_field, (attr_value * seconds * 500))
           setattr(bio, time_field, seconds)
         else:
@@ -283,18 +284,17 @@ async def notify_contact(pcontact, att_req, edate, etime):
 
   # Update pcontact.contact fields
   contact.echat_state = "ALERTING"
-  contact.comm_status = "Notifying"
   await async_my_set_attr(pcontact, "contact", contact)
   await contact.asave()
   await pcontact.asave()
 
   e_spotted_msg = "---AUTOMATED EMERGENCY NOTIFICATION---\n\nHello, we send you this message because monitor device, "
-  e_spotted_msg += "from patient '" + patient.name + " " + patient.surname + "', spotted an emergency condition (BPM LIMIT EXCEEDED)"
+  e_spotted_msg += "from patient '" + patient.name.upper() + " " + patient.surname.upper() + "', spotted an emergency condition (BPM LIMIT EXCEEDED)"
   e_spotted_msg += ". Please issue '/stop' command to let us know that you are aware of the situation.\n\n"
   e_spotted_msg += "---AUTOMATED EMERGENCY NOTIFICATION---"
 
   alarm_pushed_msg = "---AUTOMATED EMERGENCY NOTIFICATION---\n\nHello, we send you this message beacuse patient '"
-  alarm_pushed_msg += patient.name + " " + patient.surname + "', recently pushed the alarm button on his monitor device (ALARM_MSG)"
+  alarm_pushed_msg += patient.name.upper() + " " + patient.surname.upper() + "', recently pushed the alarm button on his monitor device (ALARM_MSG)"
   alarm_pushed_msg += ". Please issue '/stop' command to let us know that you are aware of the situation.\n\n"
   alarm_pushed_msg += "---AUTOMATED EMERGENCY NOTIFICATION---"
 
@@ -313,12 +313,17 @@ async def notify_contact(pcontact, att_req, edate, etime):
     qs = await async_Emergency_Payload_filter(emergency=emergency)
     exists = await qs.aexists()
     if exists:
+      # There's probably just one payload on DB for this new emergency 
+      # at this moment. Anyway, loop through the QuerySet
       async for epayload in qs:
         if epayload.ereason_payload == "Yes":
           if (epayload.msg_type == "ALARM_LIMITS_MSG" or
               epayload.msg_type == "ALARM_MSG"):
             message = alarm_pushed_msg
           break
+        elif (epayload.msg_type == "ALARM_LIMITS_MSG" or
+              epayload.msg_type == "ALARM_MSG"):
+          message = alarm_pushed_msg
       break
     else:
       print("Waiting for payload to be saved on DB")
@@ -332,12 +337,7 @@ async def notify_contact(pcontact, att_req, edate, etime):
       try: # Query database for contact/attention_request status updates
         contact = await models.Contact.objects.aget(echat_id=echat_id)
         att_req = await models.Attention_request.objects.aget(patient=patient, emergency=emergency)
-
-        if (contact.comm_status == "Received" or att_req.status == "Attended"):
-          contact.comm_status = "No emergencies"
-          await contact.asave()
-          await async_my_set_attr(pcontact, "contact", contact)
-          await pcontact.asave()
+        if (contact.echat_state != "ALERTING" or att_req.status == "Attended"):
           stopped = 1
         break
       except models.Attention_request.DoesNotExist:
@@ -372,8 +372,8 @@ async def notify_contact(pcontact, att_req, edate, etime):
       loc_msg = "Latest patient location is not available on Database.\n"
     else:
       loc_avail = 1
-      loc_msg = "Last message sent from patient's device was on: " + dev_hist.date
-      loc_msg += " , at " + dev_hist.last_msg_time + "\n"
+      loc_msg = "Last message sent from " + patient.name.upper() + " " + patient.surname.upper()
+      loc_msg += " device was on: " + dev_hist.date + " , at " + dev_hist.last_msg_time + "\n"
       loc_msg += "Location: \n"
 
 
@@ -420,18 +420,16 @@ def uplink(request):
     dev_conf = models.Device_Config.objects.get(dev_id=dev_id)
     patient = models.Patient.objects.get(dev_conf=dev_conf)
   except KeyError:
-    output = "device id not provided, return 400"
+    output = "device id or payload data not provided, return 400"
     print(output)
     return HttpResponseBadRequest(output)
   except models.Device_Config.DoesNotExist: # We can't relate payload data to any patient
-    print("Device does not exist, return 404")
     output = "Device with device id " + dev_id + " does not exist"
     print(output)
     raise Http404(output)
   except models.Patient.DoesNotExist: # We can't relate payload data to any patient
-    # print("Patient does not exist, return 404")
     output = "Patient with device id " + dev_id + " wasn't found"
-    # print(output)
+    print(output)
     raise Http404(output)
 
 
@@ -514,58 +512,41 @@ def uplink(request):
   print()
   emergency = retrieve_field(bin_data, 0, 1)                   # emergency field
   print(f"(uplink) emergency = {emergency}")
-  ereason_payload = retrieve_field(bin_data, 1, 1)               # emergency reason field
+  ereason_payload = retrieve_field(bin_data, 1, 1)             # emergency reason field
   print(f"(uplink) ereason = {ereason_payload}")
   shipment_policy = retrieve_field(bin_data, 2, 2)             # shipment_policy field
   print(f"(uplink) shipment_policy = {shipment_policy}")
   msg_type = retrieve_field(bin_data, 4, 3)                    # msg_type field
   print(f"(uplink) msg_type = {msg_type}")
 
-  # if emergency:
-      # check emergency already exists on database
-      # if not, create emergency on database, add data to database (Emergency_Biometrics), create attention request
-        # Initiate calling to SMS and Whatssap Systems (background process), do not rely on requests to the Monitor service (uplink view to be executed)
-        # Remember to set Contact.echat_state to ALERTING
-      # else (ongoing emergency)
-        # Merge payload data with Emergency_Biometrics
-        # When emergency ends (device perspective), emergency field equals to 0. i.e next payload will be added to basic Biometrics tables, not to Emergency_Biometrics
-        # Emergency will continue active until someone marks it as attended accessing a URL, or from the web
-
-  emerg_update = 0
   new_e = 0
+  emerg_update = 0
+  if emergency:
+    emerg_update = 1
   try:
     ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_date", "emerg_time")
     if emergency:
-      if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
-        emerg_update = 1
-        if (ebio.active == "No"):
-          datetime_obj2 = datetime.datetime(int(ebio.emerg_date[6:]), int(ebio.emerg_date[3:5]),
-                                            int(ebio.emerg_date[:2]), int(ebio.emerg_time[:2]),
-                                            int(ebio.emerg_time[3:5]), int(ebio.emerg_time[6:]))
-          seconds = get_sec_diff(datetime_obj, datetime_obj2)
-          if (seconds <= constants.NEW_EMERG_DELAY):
-            ebio.active = "Yes"
-          else:
-            new_e = 1
-      elif ((shipment_policy == constants.RECOVERY_SHIP_POLICY) and (ebio.active=="No")):
-        # ebio.active = "Yes" # Reactivate emergency
-        # emerg_update = 1
-        # si hacemos esto, se nos complica la diferenciacion entre tramos de emergencia (comprobamos emergencia activa eon este campo)
-        # por otro lado, seria lo suyo darle un sentido al hecho de enviar mensajes de emergencia en rpol. Enviar payload individual por SMS? i.e.?
-        # ebit==1 en medio de rpol ocurre porque salta condicion de emergencia por pulsacion o Elimit, pero se continua en rpol, 
-        # pues se viene de una epol por alguno de esos motivos.
-        pass
-    elif (ebio.active == "Yes"): # emergency == 0
+      datetime_obj2 = datetime.datetime(int(ebio.emerg_date[6:]), int(ebio.emerg_date[3:5]),
+                                        int(ebio.emerg_date[:2]), int(ebio.emerg_time[:2]),
+                                        int(ebio.emerg_time[3:5]), int(ebio.emerg_time[6:]))
+      # check emergency creation/reactivation
+      seconds = get_sec_diff(datetime_obj, datetime_obj2)
+      if (seconds > constants.NEW_EMERG_DELAY):
+        ebio.active = "No"
+        ebio.save() # As we are creating a new one, update last emergency (actual ebio object) 'active' field on DB.
+        new_e = 1
+      elif (ebio.active == "No"): # Still on the same 'logical' emergency, reactivate it
+        ebio.active = "Yes"
+
+    elif (ebio.active == "Yes"): # emergency == 0 (Emergency finished)
       ebio.active = "No"
       emerg_update = 1
   except models.Emergency_Biometrics.DoesNotExist:
-    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+    if emergency:
       new_e = 1
-      emerg_update = 1
 
   try:
     loc_info = body["computedLocation"]
-    print(f"type(loc_info) = {type(loc_info)}")
     print(f"loc_info = {loc_info}")
 
     loc_status = loc_info["status"]
@@ -619,7 +600,7 @@ def uplink(request):
     p.start()
 
 
-  if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+  if emergency:
     ebio.emsg_count = str(int(ebio.emsg_count) + 1)
 
 
@@ -664,7 +645,7 @@ def uplink(request):
       print(f"(uplink) percentage = {percentage}")
       range_name = get_attr_name(range_id)
       update_ranges(dev_hist, range_name, percentage, biometrics_24, None)
-      if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+      if emergency:
         update_ranges(dev_hist, range_name, percentage, None, ebio)
       l.append(range_id)
       per_sum += percentage
@@ -684,7 +665,7 @@ def uplink(request):
     excluded_percentage = (100 - per_sum)
     print(f"(uplink) excluded_percentage = {excluded_percentage}")
     update_ranges(dev_hist, range_name, excluded_percentage, biometrics_24, None)
-    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+    if emergency:
       update_ranges(dev_hist, range_name, excluded_percentage, None, ebio)
 
     if (excluded_id in range(4)):
@@ -698,7 +679,7 @@ def uplink(request):
     avg_bpm = retrieve_field(bin_data, 40, 8)                    # Average Beats Per Minute
     print(f"(uplink) avg_bpm = {avg_bpm}")
     update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None, datetime_obj, shipment_policy)
-    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+    if emergency:
       update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, None, ebio, datetime_obj, shipment_policy)
 
   # Next fields vary depending on which payload_format we're dealing with
@@ -710,7 +691,7 @@ def uplink(request):
     print(f"(uplink) min_bpm = {min_bpm}")
     update_bpm_ibi(dev_hist, "max_bpm", max_bpm, biometrics_24, None)
     update_bpm_ibi(dev_hist, "min_bpm", min_bpm, biometrics_24, None)
-    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+    if emergency:
       update_bpm_ibi(dev_hist, "max_bpm", max_bpm, None, ebio)
       update_bpm_ibi(dev_hist, "min_bpm", min_bpm, None, ebio)
 
@@ -725,14 +706,14 @@ def uplink(request):
       temp = retrieve_temp(bin_data, 64, 32)
       print(f"(uplink) temp = {temp}")
     update_temp(dev_hist, temp, biometrics_24, None)
-    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+    if emergency:
       update_temp(dev_hist, temp, None, ebio)
 
   if (payload_format==2 or payload_format==3 or payload_format==6):
     avg_ibi = retrieve_field(bin_data, 48, 16)                 # Average InterBeat Interval
     print(f"(uplink) avg_ibi = {avg_ibi}")
     update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, biometrics_24, None, datetime_obj, shipment_policy)
-    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+    if emergency:
       update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, None, ebio, datetime_obj, shipment_policy)
 
   if (payload_format==1 or payload_format==3 or payload_format==5 or payload_format==6):
@@ -742,7 +723,7 @@ def uplink(request):
     print(f"(uplink) min_ibi = {min_ibi}")
     update_bpm_ibi(dev_hist, "max_ibi", max_ibi, biometrics_24, None)
     update_bpm_ibi(dev_hist, "min_ibi", min_ibi, biometrics_24, None)
-    if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+    if emergency:
       update_bpm_ibi(dev_hist, "max_ibi", max_ibi, None, ebio)
       update_bpm_ibi(dev_hist, "min_ibi", min_ibi, None, ebio)
 
@@ -751,7 +732,9 @@ def uplink(request):
     print(f"(uplink) elapsed_ms = {elapsed_ms}")
 
 
-  if (shipment_policy == constants.EMERGENCY_SHIP_POLICY): # Add individual payload fields to Emergency_Payload table
+  # Add individual payload fields to Emergency_Payload table
+
+  if emergency:
     if ereason_payload:
       ereason = "Yes"
     else:
@@ -798,7 +781,7 @@ def uplink(request):
   biometrics_24.save()
   if emerg_update:
     ebio.save()
-  if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+  if emergency:
     epayload.save()
   if new_e:
     att_req.save()
