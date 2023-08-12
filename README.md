@@ -2,12 +2,12 @@
 
 ![ARDUINO MKRFOX1200](doc/images/cover.jpg)
 
-This project aims to be a monitoring system for aged people based on the ARDUINO MKRFOX1200 board and a couple of sensors atached to it that will monitor heart rate and temperature body measurements. The board will ship a set of metrics based on data recorded by these sensors throug Sigfox's network, which is accesible through its library for this board and an already included data plan. Data will be gathered, buffered and processed on our Monitoring Service, which, in turn, will make them available to the medical team and related people through a web interface. Our Monitoring Service will implement some additional functionalities like notifying an emergency condition to the predefined telephone numbers via Whatssap or SMS systems.
+This project aims to be a monitoring system for aged people based on the ARDUINO MKRFOX1200 board and a couple of sensors atached to it that will monitor heart rate and temperature body measurements. The board will ship a set of metrics based on data recorded by these sensors throug Sigfox's network, which is accessible through its library for this board and an already included data plan. Data will be gathered, buffered and processed on our Monitoring Service, which, in turn, will make them available to the medical team and related people through a web interface. Our Monitoring Service will implement some additional functionalities like notifying an emergency condition to the predefined telephone numbers via Telegram or SMS systems.
 
 
 ## Sketches
 
-We provide two sketches. One is the main program [monitor.ino](https://github.com/carlossaav/Patient-monitoring-with-Sigfox/blob/master/mkrfox1200/src/monitor/monitor.ino), where our Patient Monitoring system is implemented, and another one for testing purposes and calculations on the set of samples [measures.ino](https://github.com/carlossaav/Patient-monitoring-with-Sigfox/blob/master/mkrfox1200/src/test/measures/measures.ino).
+We provide two sketches. One is the main program [monitor.ino](https://github.com/carlossaav/Patient-monitoring-with-Sigfox/blob/master/mkrfox1200/src/monitor/monitor.ino), where our Patient Monitoring system is implemented, and another one for testing purposes and calculations on the set of samples, [measures.ino](https://github.com/carlossaav/Patient-monitoring-with-Sigfox/blob/master/mkrfox1200/src/test/measures/measures.ino).
 
 
 ## Sensors, leds and button attached to our ArduinoMKRFOX1200 board
@@ -65,7 +65,7 @@ We define several shipment policies to accomplish different shipment rates in di
 
 - **Emergency policy**: This is the highest shipment rate, thought to meet the most critical reporting needs from the medical point of view, since it's triggered in situations where, according to the measurements recorded from the sensors attached to the device, the patient is in trouble, or it was the very patient that pressed the emergency button at any point on the last sampling interval.
 
-- **Recovery shipment policy**: There are situations where the limit of the messages per day rate fixed by Sigfox could be reached prior to the end of the day (when a reset on the total amount of sent messages takes place), so we define a shipment policy that will distribute the delivery of the messages on larger intervals to avoid reaching such limit.
+- **Recovery shipment policy**: There are situations where the limit of the messages per day rate fixed by Sigfox could be reached prior to the end of the day, so we define a shipment policy that will distribute the delivery of the messages on larger intervals to avoid reaching such limit and, as a consequence, spending long periods of time without reporting patient updates.
 
 
 ## Message types

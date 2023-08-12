@@ -18,7 +18,7 @@
  *   to accurately read the PulseSensor signal.
  */
 
-#define USE_ARDUINO_INTERRUPTS false // Set-up low-level interrupts for most acurate BPM math.
+#define USE_ARDUINO_INTERRUPTS false  // Set-up low-level interrupts for most acurate BPM math.
 // #define US_PS_INTERRUPTS false
 
 
@@ -36,7 +36,7 @@
 #define EMERGENCY_LED 8            // Used on emergencies
 
 
-#define PULSE_THRESHOLD 2150  // Determine which Signal to "count as a beat" and which to ignore                               
+#define PULSE_THRESHOLD 2150  // Determine which Signal to "count as a beat" and which to ignore
 
 
 #define UPPER_BPM_LIMIT 135
@@ -75,16 +75,15 @@ struct range {
 
 /* To later process where bpm readings have been falling across the interval, 
  * we'll define a set of BPM Ranges:
- * ranges[0] stores reading counts under 50 bpm
- * ranges[1] stores reading counts between 50-75 bpm
- * ranges[2] stores reading counts between 76-105 bpm
- * ranges[3] stores reading counts between 106-130 bpm
- * ranges[4] stores reading counts higher than 130 bpm
+ * ranges[0] stores reading counts under 60 bpm
+ * ranges[1] stores reading counts between 60-89 bpm
+ * ranges[2] stores reading counts between 90-120 bpm
+ * ranges[3] stores reading counts higher than 120 bpm
  */
-struct range ranges[5];
+struct range ranges[4];
 
 unsigned int last_count = 0;
-unsigned int bpm_ibi_sample_counter = 0; // count bpm and ibi readings
+unsigned int bpm_ibi_sample_counter = 0;  // count bpm and ibi readings
 unsigned long limits_exceeded_counter = 0;
 
 
@@ -93,7 +92,7 @@ volatile byte button_flag = 0;
 byte button_pushed = 0;
 
 
-int iround = 0; // Round we are in
+int iround = 0;  // Round we are in
 unsigned long tstamp = 0;
 
 int max_bpm_arr[MAX_ROUNDS];
@@ -115,11 +114,11 @@ MAX30205 tempSensor;
 void setup() {
 
   Serial.begin(9600);
-  while (!Serial) ;
+  while (!Serial);
 
   Wire.begin();
 
-  pinMode(INPUT_BUTTON_PIN, INPUT_PULLUP); // button press
+  pinMode(INPUT_BUTTON_PIN, INPUT_PULLUP);  // button press
   pinMode(HEARTBEAT_LED, OUTPUT);
   pinMode(LIMIT_EXCEEDED_LED, OUTPUT);
   pinMode(EMERGENCY_LED, OUTPUT);
@@ -137,34 +136,36 @@ void setup() {
   pulseSensor.setThreshold(PULSE_THRESHOLD);
 
   if (pulseSensor.begin())
-    Serial.println("We created a pulseSensor Object !");
+    Serial.println("We created a Pulsesensor Object !");
   else {
     Serial.println("Problems to start reading PulseSensor");
     while (1)
       flash_led(HEARTBEAT_LED);
   }
 
-  while(!tempSensor.scanAvailableSensors()){
-    Serial.println("Couldn't find the temperature sensor, please connect the sensor." );
+  while (!tempSensor.scanAvailableSensors()) {
+    Serial.println("Couldn't find the temperature sensor, please connect the sensor.");
     delay(30000);
   }
 
 
-  for (int i=0; i<(sizeof(ranges) / sizeof(ranges[0])); i++) {
+  for (int i = 0; i < (sizeof(ranges) / sizeof(ranges[0])); i++) {
     ranges[i].rcount = 0;
     ranges[i].icount = 0;
   }
 
-  for (int i=0; i<MAX_ROUNDS; i++) {
+  for (int i = 0; i < MAX_ROUNDS; i++) {
     max_bpm_arr[i] = -1;
     min_bpm_arr[i] = -1;
     max_ibi_arr[i] = -1;
     min_ibi_arr[i] = -1;
   }
-  
 
-  sum_bpm.rsum = 0; sum_bpm.isum = 0;
-  sum_ibi.rsum = 0; sum_ibi.isum = 0;
+
+  sum_bpm.rsum = 0;
+  sum_bpm.isum = 0;
+  sum_ibi.rsum = 0;
+  sum_ibi.isum = 0;
 
   rtc.begin();
   rtc.setTime(16, 30, 00);
@@ -204,9 +205,11 @@ void get_temperature() {
   Serial.println(" ªC");
   tempSensor.shutdown();
   Serial.println();
-  Serial.print("Next update on "); Serial.print(((float)ROUND_DURATION/1000.0) + 5.0);
+  Serial.print("Next update on ");
+  Serial.print(((float)ROUND_DURATION / 1000.0) + 5.0);
   Serial.println(" seconds.");
-  Serial.println(); Serial.println();
+  Serial.println();
+  Serial.println();
 }
 
 
@@ -220,14 +223,15 @@ void print_avgs(unsigned int nsamples, byte sum_field) {
   if (sum_field == ROUND_FIELD) {
     sum_bpm_value = sum_bpm.rsum;
     sum_ibi_value = sum_ibi.rsum;
-  }
-  else { // sum_field == INTERVAL_FIELD
+  } else {  // sum_field == INTERVAL_FIELD
     sum_bpm_value = sum_bpm.isum;
     sum_ibi_value = sum_ibi.isum;
   }
 
-  Serial.print("Average bpm = "); Serial.println(round((float)sum_bpm_value/(float)nsamples));
-  Serial.print("Average ibi = "); Serial.println(round((float)sum_ibi_value/(float)nsamples));
+  Serial.print("Average bpm = ");
+  Serial.println(round((float)sum_bpm_value / (float)nsamples));
+  Serial.print("Average ibi = ");
+  Serial.println(round((float)sum_ibi_value / (float)nsamples));
   Serial.println();
 }
 
@@ -236,25 +240,27 @@ void print_ranges(unsigned int nsamples, byte range_field) {
 
   int rvalue;
   int max_value = -1;
-  int max_range_ids[3] = {-1,-1,-1};
+  int max_range_ids[3] = { -1, -1, -1 };
   byte match, match_count, counter = 0;
 
-  match = 0; match_count = 0;
-  while (counter!=3) {  // We want to save the indexes of the three highest values of ranges[] on max_range_ids[]
+  match = 0;
+  match_count = 0;
+  while (counter != 3) {  // We want to save the indexes of the three highest values of ranges[] on max_range_ids[]
     byte skipped = 0;
-    for (int i=0; i<(sizeof(ranges) / sizeof(ranges[0])); i++) {
+    for (int i = 0; i < (sizeof(ranges) / sizeof(ranges[0])); i++) {
       if (counter != 0) {
-        if (match==0) {
-          for (int j=0; j<counter; j++) {
-            if (i==max_range_ids[j]) {
-              match = 1; match_count++;
+        if (match == 0) {
+          for (int j = 0; j < counter; j++) {
+            if (i == max_range_ids[j]) {
+              match = 1;
+              match_count++;
               break;
             }
           }
         }
-        if (!skipped && match) { // counter != 0
-          if (counter==1) skipped = 1;
-          else // counter==2
+        if (!skipped && match) {  // counter != 0
+          if (counter == 1) skipped = 1;
+          else  // counter==2
             if (match_count < 2) match = 0;
             else skipped = 1;
           continue;
@@ -269,41 +275,41 @@ void print_ranges(unsigned int nsamples, byte range_field) {
         max_range_ids[counter] = i;
       }
     }
-    match = 0; match_count = 0; skipped = 0;
-    max_value = -1; counter++;
+    match = 0;
+    match_count = 0;
+    skipped = 0;
+    max_value = -1;
+    counter++;
   }
 
   /* Calculate percentages */
 
-  for (int i=0, j; i<(sizeof(max_range_ids) / sizeof(max_range_ids[0])); i++) {
+  for (int i = 0, j; i < (sizeof(max_range_ids) / sizeof(max_range_ids[0])); i++) {
     j = max_range_ids[i];
     switch (j) {
       case 0:
-        Serial.print("ranges[0] (Range < 50 bpm): ");
+        Serial.print("ranges[0] (Range < 60 bpm): ");
         break;
       case 1:
-        Serial.print("ranges[1] (Range [50-75] bpm): ");
+        Serial.print("ranges[1] (Range [60-89] bpm): ");
         break;
       case 2:
-        Serial.print("ranges[2] (Range [76-105] bpm): ");
+        Serial.print("ranges[2] (Range [90-120] bpm): ");
         break;
       case 3:
-        Serial.print("ranges[3] (Range [106-130] bpm): ");
-        break;
-      case 4:
-        Serial.print("ranges[4] (Range > 130 bpm): ");
-        break;
-      case 5:
+        Serial.print("ranges[3] (Range > 120 bpm): ");
         break;
       default:
-        Serial.println("Avoid computing percentages..."); Serial.println();
+        Serial.println("Avoid computing percentages...");
+        Serial.println();
         continue;
     }
 
     if (range_field == ROUND_FIELD) rvalue = ranges[j].rcount;
     else rvalue = ranges[j].icount;
 
-    Serial.print(round(((float)rvalue/(float)nsamples)*100.0)); Serial.print("%");
+    Serial.print(round(((float)rvalue / (float)nsamples) * 100.0));
+    Serial.print("%");
     Serial.println();
   }
   Serial.println();
@@ -356,11 +362,10 @@ byte check_lower_limit(int ibi) {
 
 
 byte bytecast(int value) {
-  if (value<0)
+  if (value < 0)
     return (byte)0;
-  else
-    if (value>255)
-      return (byte)255;
+  else if (value > 255)
+    return (byte)255;
   return byte(value);
 }
 
@@ -381,7 +386,7 @@ void loop() {
     handle_button_pushed();
     button_flag = 0;
   }
-  
+
   /* See if a sample is ready from the PulseSensor.
    *
    * If USE_INTERRUPTS is true, the PulseSensor Playground
@@ -394,32 +399,32 @@ void loop() {
 
   if (pulseSensor.sawNewSample()) {
 
-    limit = 0; digitalWrite(LIMIT_EXCEEDED_LED, LOW);
+    limit = 0;
+    digitalWrite(LIMIT_EXCEEDED_LED, LOW);
 
     bpm = bytecast(pulseSensor.getBeatsPerMinute());
     ibi = pulseSensor.getInterBeatIntervalMs();
 
-    sum_bpm.rsum += bpm; sum_bpm.isum += bpm;
-    sum_ibi.rsum += ibi; sum_ibi.isum += ibi;
+    sum_bpm.rsum += bpm;
+    sum_bpm.isum += bpm;
+    sum_ibi.rsum += ibi;
+    sum_ibi.isum += ibi;
     bpm_ibi_sample_counter++;
 
-    if (bpm<50) increase_range(0);
-    else if (bpm>=50 && bpm <=75) increase_range(1);
-    else if (bpm>75 && bpm <=105) increase_range(2);
-    else if (bpm>105 && bpm <=130) increase_range(3);
-    else increase_range(4); // bpm > 130
+    if (bpm<60) increase_range(0);
+    else if (bpm>=60 && bpm <=89) increase_range(1);
+    else if (bpm>=90 && bpm <=120) increase_range(2);
+    else increase_range(3); // bpm > 120
 
     if (bpm > max_bpm_round)
       max_bpm_round = bpm;
-    else
-      if (bpm < min_bpm_round)
-        min_bpm_round = bpm;
+    else if (bpm < min_bpm_round)
+      min_bpm_round = bpm;
 
     if (ibi > max_ibi_round)
       max_ibi_round = ibi;
-    else
-      if (ibi < min_ibi_round)
-        min_ibi_round = ibi;
+    else if (ibi < min_ibi_round)
+      min_ibi_round = ibi;
 
 
     /* Double checking match relies on values set by constants UPPER_BPM_LIMIT, etc.
@@ -435,8 +440,7 @@ void loop() {
         Serial.print("Ibi = "); Serial.println(ibi);
       }
       */
-    }
-    else {
+    } else {
       if (check_lower_limit(bpm)) {
         limits_exceeded_counter++;
         limit = 1;
@@ -463,27 +467,38 @@ void loop() {
     last_count = bpm_ibi_sample_counter;
 
     Serial.print("ROUND: ");
-    Serial.println(iround); Serial.println();
+    Serial.println(iround);
+    Serial.println();
     Serial.print("Program started ");
-    Serial.print((float)millis()/1000.0, 2);
+    Serial.print((float)millis() / 1000.0, 2);
     Serial.println(" seconds ago.");
-    Serial.println(); Serial.println();
+    Serial.println();
+    Serial.println();
 
-    Serial.print("We've got up to "); Serial.print(nsamples);
-    Serial.print(" samples in "); Serial.print((float)duration/1000.0, 2);
-    Serial.print(" seconds"); Serial.println();
+    Serial.print("We've got up to ");
+    Serial.print(nsamples);
+    Serial.print(" samples in ");
+    Serial.print((float)duration / 1000.0, 2);
+    Serial.print(" seconds");
+    Serial.println();
 
     Serial.print("bpm_ibi_sample_counter = ");
     Serial.println(bpm_ibi_sample_counter);
     Serial.print("limits_exceeded_counter = ");
-    Serial.println(limits_exceeded_counter); Serial.println();
-    
-    Serial.print("max_bpm_round = "); Serial.println(max_bpm_round);
-    Serial.print("min_bpm_round = "); Serial.println(min_bpm_round);
+    Serial.println(limits_exceeded_counter);
     Serial.println();
-    Serial.print("max_ibi_round = "); Serial.println(max_ibi_round);
-    Serial.print("min_ibi_round = "); Serial.println(min_ibi_round);
-    Serial.println(); Serial.println();
+
+    Serial.print("max_bpm_round = ");
+    Serial.println(max_bpm_round);
+    Serial.print("min_bpm_round = ");
+    Serial.println(min_bpm_round);
+    Serial.println();
+    Serial.print("max_ibi_round = ");
+    Serial.println(max_ibi_round);
+    Serial.print("min_ibi_round = ");
+    Serial.println(min_ibi_round);
+    Serial.println();
+    Serial.println();
 
     if (max_bpm_round > max_bpm)
       max_bpm = max_bpm_round;
@@ -511,28 +526,30 @@ void loop() {
     if (bpm_ibi_sample_counter != 0) {  // (Avoid division by zero on runtime!)
       print_avgs(nsamples, ROUND_FIELD);
       print_ranges(nsamples, ROUND_FIELD);
-    }
-    else Serial.println("No samples on the box!");
+    } else Serial.println("No samples on the box!");
 
 
     /* Reset round counters and additions */
-    sum_bpm.rsum = 0; sum_ibi.rsum = 0;
-    for (int i=0; i<(sizeof(ranges) / sizeof(ranges[0])) ; i++)
+    sum_bpm.rsum = 0;
+    sum_ibi.rsum = 0;
+    for (int i = 0; i < (sizeof(ranges) / sizeof(ranges[0])); i++)
       ranges[i].rcount = 0;
 
 
     if (millis() >= INTERVAL_DURATION) {
       Serial.print("This program has been running for ");
-      Serial.print(((float)millis()/1000.0)/60.0, 2); Serial.println(" minutes");
+      Serial.print(((float)millis() / 1000.0) / 60.0, 2);
+      Serial.println(" minutes");
       // Serial.print("(millis()/1000)/60 (minutes) = "); Serial.println((millis()/1000)/60.0);
       Serial.println();
 
-      Serial.println("HISTORY OF MAXS AND MINS"); Serial.println();
+      Serial.println("HISTORY OF MAXS AND MINS");
+      Serial.println();
 
       Serial.print("MAXS BPM ROUNDS: [");
       if (max_bpm_arr[0] != -1) {
         Serial.print(max_bpm_arr[0]);
-        for (int i=1; i<MAX_ROUNDS; i++) {
+        for (int i = 1; i < MAX_ROUNDS; i++) {
           if (max_bpm_arr[i] == -1)
             break;
           Serial.print(",");
@@ -545,7 +562,7 @@ void loop() {
 
       if (min_bpm_arr[0] != -1) {
         Serial.print(min_bpm_arr[0]);
-        for (int i=1; i<MAX_ROUNDS; i++) {
+        for (int i = 1; i < MAX_ROUNDS; i++) {
           if (min_bpm_arr[i] == -1)
             break;
           Serial.print(",");
@@ -557,7 +574,7 @@ void loop() {
       Serial.print("MAXS IBI ROUNDS: [");
       if (max_ibi_arr[0] != -1) {
         Serial.print(max_ibi_arr[0]);
-        for (int i=1; i<MAX_ROUNDS; i++) {
+        for (int i = 1; i < MAX_ROUNDS; i++) {
           if (max_ibi_arr[i] == -1)
             break;
           Serial.print(",");
@@ -569,7 +586,7 @@ void loop() {
       Serial.print("MINS IBI ROUNDS: [");
       if (min_ibi_arr[0] != -1) {
         Serial.print(min_ibi_arr[0]);
-        for (int i=1; i<MAX_ROUNDS; i++) {
+        for (int i = 1; i < MAX_ROUNDS; i++) {
           if (min_ibi_arr[i] == -1)
             break;
           Serial.print(",");
@@ -577,10 +594,11 @@ void loop() {
         }
       }
       Serial.println("]");
-      Serial.println(); Serial.println();
-      
+      Serial.println();
+      Serial.println();
+
       /* Compute and report measurements... */
-      
+
       if (bpm_ibi_sample_counter != 0) {  // Avoid division by zero on runtime!
         print_avgs(bpm_ibi_sample_counter, INTERVAL_FIELD);
         print_ranges(bpm_ibi_sample_counter, INTERVAL_FIELD);
@@ -593,29 +611,32 @@ void loop() {
         Serial.println(max_ibi);
         Serial.print("Lowest ibi value read (min_ibi) = ");
         Serial.println(min_ibi);
-      }
-      else Serial.println("No samples on the box!");
+      } else Serial.println("No samples on the box!");
 
-      Serial.println(); Serial.println();
+      Serial.println();
+      Serial.println();
       Serial.print("Total limits exceeded (limits_exceeded_counter) = ");
-      Serial.println(limits_exceeded_counter); Serial.println();
+      Serial.println(limits_exceeded_counter);
+      Serial.println();
       Serial.print("Total Taken samples (bpm_ibi_sample_counter) = ");
       Serial.println(bpm_ibi_sample_counter);
       Serial.println("End of story. Bye bye.");
       rtc.standbyMode();
-      while (1);
-    }
-    
-    if (iround==MAX_ROUNDS) {
-      Serial.println("We've got to maximum round. Restart the program to continue sampling.");
-      while (1);
+      while (1)
+        ;
     }
 
-    rtc.setAlarmSeconds((rtc.getSeconds() + 5)%60);
+    if (iround == MAX_ROUNDS) {
+      Serial.println("We've got to maximum round. Restart the program to continue sampling.");
+      while (1)
+        ;
+    }
+
+    rtc.setAlarmSeconds((rtc.getSeconds() + 5) % 60);
     rtc.enableAlarm(rtc.MATCH_SS);
     rtc.attachInterrupt(get_temperature);
     Serial.println("Reading temperature in 5 seconds...");
-    
+
     tstamp = millis();
   }
 }

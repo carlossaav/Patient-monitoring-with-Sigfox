@@ -70,11 +70,12 @@
 
 #define MIN_SAMPLING_INTERVAL 30000 // Must be non-negative
 #define REMAINING_MSG  MAX_UPLINK_MSGS - (int)(1440.0/SHIPMENT_INTERVAL_MIN)
-#define SHIPMENT_RETRY 12000      // Time to retry a failed shipment
+#define SHIPMENT_RETRY 45000      // Time to retry a failed shipment
 #define MAX_SHIPMENT_RETRIES 5
 
 // In case of Sigfox or PulseSensor chipset failure
 #define CHECK_ERROR_COND 30000
+#define FAILED_DOWNLINK_RECEPTION 62 // ("0x62")
 
 
 // Default values on Temperature or PulseSensor errors
@@ -103,13 +104,12 @@ unsigned int sum_bpm, sum_ibi;
 
 /* To later process where bpm readings have been falling across the interval, 
  * we'll define a set of BPM Ranges:
- * ranges[0] stores reading counts under 50 bpm
- * ranges[1] stores reading counts between 50-75 bpm
- * ranges[2] stores reading counts between 76-105 bpm
- * ranges[3] stores reading counts between 106-130 bpm
- * ranges[4] stores reading counts higher than 130 bpm
+ * ranges[0] stores reading counts under 60 bpm
+ * ranges[1] stores reading counts between 60-89 bpm
+ * ranges[2] stores reading counts between 90-120 bpm
+ * ranges[3] stores reading counts higher than 120 bpm
  */
-int ranges[5] = {0,0,0,0,0};
+int ranges[4] = {0,0,0,0};
 
 
 // Buffers for sending and receiving
@@ -311,6 +311,7 @@ void setup() {
 /* Executed at 00:00:00 h */
 void reset_day() {
   msg = 0;
+  set_rec_seqs();
 }
 
 void set_rec_seqs() {
@@ -1047,7 +1048,14 @@ void send_measurements() {
   if (!downlink_done) code = SigFox.endPacket(true);  // Set Downlink Request by passing true to endPacket()
   else code = SigFox.endPacket();
 
-  if (code==0) {
+  if (code==0 ||
+      SigFox.statusCode(SIGFOX)==FAILED_DOWNLINK_RECEPTION) {
+
+    /* From https://github.com/divetm/Getting-started-with-Sigfox/blob/master/Sensit_project/sdk/inc/sigfox/sigfox_api.h:
+     *  (0x62): Error occurs during the nvm storage used for ack transmission.
+
+     * It seems to be related to failed downlinnk requests. Count it as success, as it 
+     * effectively ships the uplink message despite of such error */
 
     shipment = millis(); msg++;
     button_pushed = 0;
@@ -1503,11 +1511,10 @@ void loop() {
     bpm_ibi_sample_counter++; // count bpm and ibi readings
     set_max_and_min(bpm, ibi);
 
-    if (bpm<50) ranges[0]++;
-    else if (bpm>=50 && bpm <=75) ranges[1]++;
-    else if (bpm>75 && bpm <=105) ranges[2]++;
-    else if (bpm>105 && bpm <=130) ranges[3]++;
-    else ranges[4]++; // bpm > 130
+    if (bpm<60) ranges[0]++;
+    else if (bpm>=60 && bpm <=89) ranges[1]++;
+    else if (bpm>=90 && bpm <=120) ranges[2]++;
+    else ranges[3]++; // bpm > 120
 
     // check limits
     if (check_upper_limit(bpm))
