@@ -773,7 +773,7 @@ void send_measurements() {
   static float temp;
   static unsigned long tstamp, temp_tstamp = 0;
   byte msg_type = REPORT_MSG;
-  byte payload_format, code;
+  byte buff_size, payload_format, code;
 
   if (ship_attempt++==0) {
     byte i=0;
@@ -899,8 +899,14 @@ void send_measurements() {
 
   /* Computing measurements... */
 
-  if (bpm_ibi_sample_counter==0) // More secure than reading pulsesensor_err. (Division by 0 on avg_bpm computing)
-    avg_bpm = BPM_READING_ERR;   // avoid computing bpm fields
+  /* pulsesensor_check() might be scheduled to run periodically.
+   * Just reading 'pulsesensor_err' variable without checking the value of
+   * 'bpm_ibi_sample_counter' may lead to division by 0 on 'avg_bpm' computing,
+   * since that function may set 'pulsesensor_err' variable to 0 before any
+   * sample has been gathered. */
+
+  if (pulsesensor_err || bpm_ibi_sample_counter==0)
+    avg_bpm = BPM_READING_ERR; // avoid computing bpm fields
   else {
     int max_value = -1;
     int max_range_ids[3] = {-1,-1,-1};
@@ -1042,8 +1048,12 @@ void send_measurements() {
 
   /* Shipping... */
 
+  buff_size = SHIPMENT_BUFFER_SIZE;
+  if (payload_format == 4)  // 10 byte-packet
+    buff_size = 10;
+
   SigFox.beginPacket();
-  SigFox.write(send_buff, SHIPMENT_BUFFER_SIZE);
+  SigFox.write(send_buff, buff_size);
 
   if (!downlink_done) code = SigFox.endPacket(true);  // Set Downlink Request by passing true to endPacket()
   else code = SigFox.endPacket();
@@ -1052,7 +1062,7 @@ void send_measurements() {
       SigFox.statusCode(SIGFOX)==FAILED_DOWNLINK_RECEPTION) {
 
     /* From https://github.com/divetm/Getting-started-with-Sigfox/blob/master/Sensit_project/sdk/inc/sigfox/sigfox_api.h:
-     *  (0x62): Error occurs during the nvm storage used for ack transmission.
+     * (0x62): Error occurs during the nvm storage used for ack transmission.
 
      * It seems to be related to failed downlinnk requests. Count it as success, as it 
      * effectively ships the uplink message despite of such error */

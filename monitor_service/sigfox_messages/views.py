@@ -231,7 +231,6 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
 
 @require_GET
 @csrf_exempt
-# def downlink(request):
 def downlink(request, dev_id):
 
   datetime_obj = datetime.datetime.now()
