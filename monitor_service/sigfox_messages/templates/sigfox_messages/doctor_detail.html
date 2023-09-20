@@ -1,0 +1,73 @@
+{% if request.user.is_authenticated %}
+  {% if doctor %}
+    <p><strong>Doctor's information:</strong></p>
+    <ul>
+    <li>Name: {{ doctor.name }} </li>
+    <li>Surname: {{ doctor.surname }}</li>
+    <li>State: {{ doctor.state }} </li>
+    </ul>
+    {% if request.user.is_staff %}
+      <p><strong>Update doctor's availability to "available" or "busy"</strong></p>
+      <form action="{% url 'doctor_detail' doctor.id %}" method="post">
+      {% csrf_token %}
+      <label>Doctor's state:</a>
+      <input type="textfield" name="doctor state"/><BR>
+      <input type="submit" value="Update Doctor's state" />
+      </form>
+      <BR><BR>
+      {% if doctor_updated %}
+        <p><strong>Doctor's state was succesfully updated</strong></p>
+      {% else %}
+        {% if wrong_state %}
+          <p><strong>State '{{ wrong_state }}' is not correct. </strong>
+          Doctor's state options are "available" or "busy".</p>
+        {% endif %}
+      {% endif %}
+
+      {% if patient_att_req %}
+        <p><strong>Below there's a list of unattended requests from patients that require
+        your attention:</strong><p>
+        {% for att_req_list in patient_att_req %}
+          {% for att_req in att_req_list %}
+            <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.patient.surname }}, 
+            {{ att_req.patient.name }}; {{ att_req.request_date }} {{ att_req.request_time }}
+            </a></li>
+          {% endfor %}
+        {% endfor %}
+      {% else %}
+        <p><strong>There are no requests registered for you.</strong></p>     
+      {% endif %}
+    {% else %}
+      <BR>
+      <p><strong>If you wish to manually request your doctor's attention, please fill in the
+      fields below:</strong></p>
+      <form action="{% url 'doctor_detail' doctor.id %}" method="post">
+      {% csrf_token %}
+      <label>Patient's dni:</a>
+      <input type="textfield" name="patient dni"/><BR>
+      <label>Request priority ("Normal/"Urgent"):</a>
+      <input type="textfield" name="request priority"/><BR>
+      <BR>
+      <input type="submit" value="Request Doctor" /><BR>
+      <BR>
+      {% if invalid_priority %}
+        <p><strong>*</strong> Valid values for request priority are <strong>'Normal'</strong> 
+        or <strong>'Urgent'*</strong></p>
+      {% else %}
+        {% if att_req_created %}
+          <p><strong> The request was successfully registered</strong></p>
+        {% else %}
+          {% if invalid_patient %}
+            <p><strong>Specified patient is not valid</strong></p>
+          {% endif %}
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  {% else %}
+    <p>Requested doctor wasn't found</p>
+  {% endif %}
+  <BR><BR>
+  <a href="{% url 'index' %}">Back to main portal</a></p>
+{% else %}
+    <a href="{% url 'login' %}?next={{request.path}}">Log in to see this page</a>
+{% endif %}

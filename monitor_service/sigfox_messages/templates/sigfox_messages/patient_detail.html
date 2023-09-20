@@ -1,0 +1,147 @@
+{% if request.user.is_authenticated %}
+  {% if not_allowed %}
+    <p><strong>You're not allowed to see this information.</strong></p>
+  {% else %}
+    {% if patient %}
+      <h2>Information from patient linked to '{{ patient.user }}' account:</h2>
+      <ul>
+      <li>Dni: {{ patient.dni }}</li>
+      <li>Name: {{ patient.name }}</li>
+      <li>Surname: {{ patient.surname }}</li>
+      <li>Linked Device: <a href="{% url 'device_config_detail' patient.dev_conf %}">
+      {{ patient.dev_conf }}</a></li>
+      <li>Doctor's full name: <a href="{% url 'doctor_detail' patient.doctor.id %}">
+      {{ patient.doctor.name }} {{ patient.doctor.surname }}</a></li>
+      <li>Age: {{ patient.age }}</li>
+      <li>Follow_up: {{ patient.follow_up }}</li>
+      {% if phone_numbers %}
+        <li>Emergency phone numbers:</li>
+        <ul>
+        {% for number in phone_numbers %}
+          <li>{{ number }}</li>
+        {% endfor %}
+        </ul>
+      {% else %}
+        <li>There are no emergency numbers linked to this patient yet</li>
+      {% endif %}
+      </ul>
+
+      {% if ongoing_emergency %}
+        <h3>There's an emergency currently active from this patient:
+        <a href="{% url 'emergency_detail' ongoing_emergency.id %}">
+        <strong>See emergency measures</a></strong></h3>
+        {% if not_attended %}
+          <p><strong>**</strong>If you want to quickly set the current emergency as "Attended" 
+          so every configured number<BR>stops receiving the emergency notification, 
+          click on the following link<strong>**</strong>:
+          <a href="{% url 'patient_detail' patient.dni %}?emergency_attended=true">
+          Set emergency as Attended</a></p>
+        {% else %}
+          {% if attended %}
+            <p><strong>**The ongoing emergency has already been acknowledged by our medical team**.
+            </strong></p>
+          {% endif %}
+        {% endif %}
+      {% endif %}
+
+      {% if bio_24 %}
+        <p>Check out daily-based measures gathered from the device: 
+        <a href="{% url 'biometrics24_detail' bio_24.patient %}">Day-based biometrics</a></p>
+      {% else %}
+        <p><strong>Today's biometrics are not available.</strong></p>
+      {% endif %}
+
+      {% if emergency_list %}
+        <p>Check out patient's historical biometrics on emergencies:</p>
+        <ul>
+        {% for ebio in emergency_list %}
+          <li><a href="{% url 'emergency_detail' ebio.id %}">{{ ebio.emerg_date }}, {{ ebio.emerg_time }}
+          </a></li>
+        {% endfor %}
+        </ul>
+      {% else %}
+        <p><strong>There are no historical records of emergencies available for this patient.</strong></p>
+      {% endif %}
+
+      {% if bio_list %}
+        <p>Check out patient's biometric history.:</p>
+        <ul>
+        {% for bio in bio_list %}
+          <li><a href="{% url 'biometrics_detail' bio.id %}">{{bio.date}}</a></li>
+        {% endfor %}
+        </ul>
+      {% else %}
+        <p><strong>There are no historical biometrics records available for this patient.</strong></p>
+      {% endif %}
+
+      {% if empty_att_req %}
+        <p><strong>The patient has never requested our medical team.</strong></p>
+      {% else %}
+        {% if auto_att_req %}
+          <p>The following attention requests were <strong>automatically generated</strong> for patient 
+          '{{ patient.name }} {{ patient.surname }}',<strong><BR>due to the detection of emergency conditions:
+          </strong></p>
+          <ul>
+          {% for att_req in auto_att_req %}
+            <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.request_date }}, 
+            {{ att_req.request_time }}</a></li>
+          {% endfor %}
+          </ul>
+        {% endif %}
+
+        {% if manual_att_req %}
+          <p>The following attention requests were <strong>manually registered</strong>:</p>
+          <ul>
+          {% for att_req in manual_att_req %}
+            <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.request_date }}, 
+            {{ att_req.request_time }}</a></li>
+          {% endfor %}
+          </ul>
+        {% endif %}
+      {% endif %}
+
+      <BR>
+      {% if request.user.is_staff %}
+        <p><strong>If you wish to modify current patient's information, please fill in the desired
+        fields below:</strong></p>
+        <form action="{% url 'patient_detail' patient.dni %}" method="post">
+        {% csrf_token %}
+        <label>New linked device (identifier):</a>
+        <input type="textfield" name="device id"/><BR>
+        <label>New Doctor's full name:</a>
+        <input type="textfield" name="doctor full name"/><BR>
+        <label>New follow-up:</a>
+        <input type="textfield" name="follow up"/><BR>
+        <BR>
+        <input type="submit" value="Modify patient info" /><BR>
+        </form>
+        {% if form_err %}
+          <p><strong>Some errors happened during form processing.</strong></p>
+        {% else %}
+          {% if patient_updated %}
+            <p><strong>All specified fields were successfully updated.</strong></p>
+          {% else %}
+            {% if error_message %}
+              <p><strong>{{ error_message }}</strong></p>
+            {% endif %}
+          {% endif %}
+        {% endif %}
+        <BR>
+      {% endif %}
+      <p>*If you want to stop following this patient on your account, and start monitoring it <BR>on another
+      you have access to, please click on the following link and then relate <BR>the patient on the newer one*:
+      <a href="{% url 'patient_detail' patient.dni %}?unlink_acc=true">Unlink patient</a></p>
+      {% if unlink %}
+        <p><strong>Patient '{{ patient.name }} {{ patient.surname }}' removed from your
+        account</strong></p>
+      {% endif %}
+    {% else %}
+      {% if patient_id %}
+        <p><strong>Patient with dni '{{ patient_id }}' not found</strong></p>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+  <a href="{% url 'index' %}">Back to main portal</a></p>
+{% else %}
+  <a href="{% url 'login' %}?next={{request.path}}">Log in to see this page</a>
+{% endif %}

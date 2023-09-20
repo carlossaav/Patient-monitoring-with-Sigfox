@@ -4,7 +4,7 @@ from sigfox_messages import models
 # Register your models here.
 
 admin.site.register(models.Doctor)
-admin.site.register(models.Doctor_Request)
+# admin.site.register(models.Doctor_Request)
 admin.site.register(models.Device_Config)
 admin.site.register(models.Device_History)
 admin.site.register(models.Patient)

@@ -1,0 +1,25 @@
+{% if request.user.is_authenticated %}
+  {% if not_allowed %}
+    <p><strong>You're not allowed to see this information.</strong></p>
+  {% else %}
+    {% if dev_hist %}
+      <p><strong>Activity log of device '{{ dev_hist.dev_conf }}' on date {{ dev_hist.date }}:</strong></p>
+      <ul>
+      <li>Running since: {{ dev_hist.running_since }} </li>
+      <li>Last message sent at: {{ dev_hist.last_msg_time }} </li>
+      <li>Last reported state: {{ dev_hist.last_dev_state }}</li>
+      <li>Last known latitude: {{ dev_hist.last_known_latitude }} </li>
+      <li>Last known longitude: {{ dev_hist.last_known_longitude }} </li>
+      <li>Number of messages sent: {{ dev_hist.uplink_count }} </li>
+      <li>Number of resets (asked for configuration): {{ dev_hist.downlink_count }} </li>
+      </ul>
+    {% else %}
+      <h3>There's no activity logged to be shown.</h3>
+    {% endif %}
+  {% endif %}
+  <BR>
+  <a href="{% url 'index' %}">Back to main portal</a>
+{% else %}
+  <p>Log in to see this page</p>
+  <a href="{% url 'login' %}?next={{request.path}}">Log in</a>
+{% endif %}

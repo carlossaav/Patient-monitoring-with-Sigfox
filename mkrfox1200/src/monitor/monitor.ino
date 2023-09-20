@@ -868,7 +868,7 @@ void send_measurements() {
   /* Setting first 7 bits of the payload...*/
   
   bitWrite(send_buff[0], 7, emergency_active()); // emergency field
-  bitWrite(send_buff[0], 6, ereason_payload); // emergency reason payload field
+  bitWrite(send_buff[0], 6, ereason_payload);    // emergency reason payload field
 
   // Shipment policy field
   if (epol_active()) write_dec_to_bin(&(send_buff[0]), 1, 5, 2);
@@ -915,8 +915,11 @@ void send_measurements() {
     avg_bpm = (byte)round((float)sum_bpm/(float)bpm_ibi_sample_counter);
     avg_ibi = round((float)sum_ibi/(float)bpm_ibi_sample_counter);
 
+    /* We want to save the indexes of the three highest values of ranges[] 
+     * on max_range_ids[] */
+
     match = 0; match_count = 0;
-    while (counter!=3) {  // We want to save the indexes of the three highest values of ranges[] on max_range_ids[]
+    while (counter != 3) {
       byte skipped = 0;
 
       for (int i=0; i<(sizeof(ranges) / sizeof(ranges[0])); i++) {
@@ -951,15 +954,15 @@ void send_measurements() {
 
     bitWrite(send_buff[0], 0, (max_range_ids[0] >= 4));
     write_dec_to_bin(&(send_buff[1]), (byte)(max_range_ids[0] % 4), 7, 2); // First range id setting
-    write_dec_to_bin(&(send_buff[2]), (byte)max_range_ids[1], 5, 3); // Second range id setting
-    write_dec_to_bin(&(send_buff[3]), (byte)max_range_ids[2], 2, 3); // Third range id setting
+    write_dec_to_bin(&(send_buff[2]), (byte)max_range_ids[1], 5, 3);       // Second range id setting
+    write_dec_to_bin(&(send_buff[3]), (byte)max_range_ids[2], 2, 3);       // Third range id setting
 
 
     /* Calculate and set percentages */
 
     for (int i=0, j; i<(sizeof(max_range_ids) / sizeof(max_range_ids[0])); i++) {
       j = max_range_ids[i];
-      max_range_ids[i] = round(((float)ranges[j]/(float)bpm_ibi_sample_counter)*100.0);  // Reuse max_range_ids[] to save numerators
+      max_range_ids[i] = round(((float)ranges[j]/(float)bpm_ibi_sample_counter)*100.0); // Reuse max_range_ids[] to save numerators
     }
 
     numerator = (byte)max_range_ids[0];

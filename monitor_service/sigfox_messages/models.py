@@ -1,5 +1,5 @@
 from django.db import models
-#from django.contrib.auth.models import User
+from django.contrib.auth.models import User
 
 class Device_Config(models.Model):
 
@@ -11,6 +11,9 @@ class Device_Config(models.Model):
   bpm_limit_window = models.CharField(max_length=4)
   min_delay = models.CharField(max_length=4)
 
+  def __str__(self):
+    return self.dev_id
+
 
 class Device_History(models.Model):
 
@@ -21,9 +24,12 @@ class Device_History(models.Model):
   last_dev_state = models.CharField(max_length=25)
   last_known_latitude = models.CharField(max_length=25)
   last_known_longitude = models.CharField(max_length=25)
-  last_known_loc = models.CharField(max_length=50)
+  # last_known_loc = models.CharField(max_length=50)
   uplink_count = models.CharField(max_length=3)
   downlink_count = models.CharField(max_length=3)
+
+  def __str__(self):
+    return str(self.dev_conf) + self.date
 
 
 class Doctor(models.Model):
@@ -33,16 +39,23 @@ class Doctor(models.Model):
   # dni = models.CharField(max_length=25)
   state = models.CharField(max_length=25)
 
+  def __str__(self):
+    return self.name
+
 
 class Patient(models.Model):
 
   dni = models.CharField(max_length=25, primary_key=True)
   name = models.CharField(max_length=25)
   surname = models.CharField(max_length=50)
+  user = models.ForeignKey(User, on_delete=models.SET_NULL, blank=True, null=True)
   age = models.CharField(max_length=3)
   dev_conf = models.OneToOneField(Device_Config, on_delete=models.SET_NULL, blank=True, null=True)
   doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, blank=True, null=True)
   follow_up = models.CharField(max_length=25)
+
+  def __str__(self):
+    return self.dni
 
 
 class Contact(models.Model):
@@ -54,17 +67,26 @@ class Contact(models.Model):
   sms_alerts = models.CharField(max_length=3)  # ("Yes/No")
   # comm_status = models.CharField(max_length=25) # Emergency notification 'state' ("No emergencies"/"Notifying"/"Received")
 
+  def __str__(self):
+    return self.echat_id
+
 
 class Patient_Contact(models.Model):
 
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
   contact = models.ForeignKey(Contact, on_delete=models.CASCADE)
 
+  def __str__(self):
+    return str(self.patient) + ", " + str(self.contact)
+
 
 class Patient_Device_History(models.Model):
 
   dev_hist = models.OneToOneField(Device_History, on_delete=models.CASCADE, primary_key=True)
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
+
+  def __str__(self):
+    return str(self.patient) + ", " + str(self.dev_hist)
 
 
 class Emergency_Biometrics(models.Model):
@@ -73,7 +95,7 @@ class Emergency_Biometrics(models.Model):
   emerg_date = models.CharField(max_length=10) # dd/mm/yy format
   emerg_time = models.CharField(max_length=8) # hh:mm:ss format
   emsg_count = models.CharField(max_length=2)
-  active = models.CharField(max_length=25)
+  active = models.CharField(max_length=5)
 
   bpm_time = models.CharField(max_length=50)
   ibi_time = models.CharField(max_length=50)
@@ -101,6 +123,9 @@ class Emergency_Biometrics(models.Model):
   avg_temp = models.CharField(max_length=6)
   max_temp = models.CharField(max_length=6)
   min_temp = models.CharField(max_length=6)
+  
+  def __str__(self):
+    return str(self.id)
 
 
 class Emergency_Payload(models.Model):
@@ -125,6 +150,9 @@ class Emergency_Payload(models.Model):
   temp = models.CharField(max_length=15)
   elapsed_ms = models.CharField(max_length=50)
 
+  def __str__(self):
+    return str(self.id)
+
 
 class Attention_request(models.Model):
 
@@ -133,17 +161,23 @@ class Attention_request(models.Model):
 
   request_date = models.CharField(max_length=10) # dd/mm/yy format
   request_time = models.CharField(max_length=8) # hh:mm:ss format
-  request_type = models.CharField(max_length=25)
-  status = models.CharField(max_length=25) # ("Ongoing"/"Attended")
+  request_priority = models.CharField(max_length=25) # ("Normal"/"Urgent")
+  status = models.CharField(max_length=25) # ("Attended"/"Unattended")
 #  emerg_state = models.CharField(max_length=25)
 
+  def __str__(self):
+    return str(self.emergency) + ", " + str(self.patient)
 
-class Doctor_Request(models.Model):
 
-  attention_request = models.OneToOneField(Attention_request, on_delete=models.CASCADE, primary_key=True)
-  doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, blank=True, null=True)
-  patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-  request_state = models.CharField(max_length=25) # ("Pending/Accepted/Attended")
+# class Doctor_Request(models.Model):
+
+  # attention_request = models.OneToOneField(Attention_request, on_delete=models.CASCADE, primary_key=True)
+  # doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, blank=True, null=True)
+  # patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
+  # request_state = models.CharField(max_length=25) # ("Pending/Accepted")
+
+  # def __str__(self):
+    # return str(self.attention_request) + ", " + str(self.doctor)
 
 
 class Biometrics(models.Model):
@@ -173,6 +207,9 @@ class Biometrics(models.Model):
 
   # Look at max_bpm/min_bpm fields on LIMITS_MSG message, then update this field on database if proceeds. Important timestamp for the medical team.
   last_elimit_time = models.CharField(max_length=8)
+
+  def __str__(self):
+    return str(self.patient) + ", " + self.date
 
 
 class Biometrics_24(models.Model):
@@ -210,3 +247,6 @@ class Biometrics_24(models.Model):
 
   # Look at max_bpm/min_bpm fields on LIMITS_MSG message, then update this field on database if proceeds. Important timestamp for the medical team.
   last_elimit_time = models.CharField(max_length=8)
+
+  def __str__(self):
+    return str(self.patient)

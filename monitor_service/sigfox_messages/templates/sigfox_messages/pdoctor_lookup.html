@@ -1,0 +1,27 @@
+{% if request.user.is_authenticated %}
+  {% if request.user.is_staff %}
+    {% if doctor %}
+      {% if patient_qs %}
+        <p><strong>Below are the patients currently related to doctor '{{ doctor.name }} 
+        {{doctor.surname}}':</strong></p>
+        <ul>
+        {% for patient in patient_qs %}
+          <li><a href="{% url 'patient_detail' patient.dni %}">{{ patient.name }} 
+          {{ patient.surname }}</a></li>
+        {% endfor %}
+        </ul>
+      {% else %}
+        <h2>There are no patients related to doctor '{{ doctor.name }} 
+        {{doctor.surname}}'</h2>
+      {% endif %}
+    {% else %}
+      <p>Requested doctor wasn't found</p>
+    {% endif %}
+  {% else %}
+    <p>Only authorised users can see this information</p>
+  {% endif %}
+  <a href="{% url 'index' %}">Back to main portal</a></p>
+{% else %}
+  <p>Log in as an authorised user to see this page</p>
+  <a href="{% url 'login' %}?next={{request.path}}">Log in</a>
+{% endif %}

@@ -1,0 +1,74 @@
+{% if request.user.is_authenticated %}
+  {% if not_allowed %}
+    <p><strong>You're not allowed to see this information.</strong></p>
+  {% else %}
+    {% if patient %}
+      <p><strong>Information from device linked to patient <a href="{% url 'patient_detail' patient.dni %}">'{{ patient.name }} {{patient.surname}}'</a>:</strong></p>
+    {% else %}
+      {% if failed_patient %}
+        <p><strong>**This device has not been linked to any patient yet**</strong></p>
+      {% endif %}
+    {% endif %}
+    {% if device %}
+      <ul>
+      <li>Device identifier: {{ device.dev_id }} </li>
+      <li>Higher bpm limit configured: {{ device.higher_bpm_limit }} </li>
+      <li>Lower bpm limit configured: {{ device.lower_bpm_limit }}</li>
+      <li>Higher bpm limit configured to trigger emergency: {{ device.higher_ebpm_limit }} </li>
+      <li>Lower bpm limit configured to trigger emergency: {{ device.lower_ebpm_limit }} </li>
+      <li>Bpm limit window* (in seconds): {{ device.bpm_limit_window }} </li>
+      <li>Minimum delay*: {{ device.min_delay }} </li>
+      </ul>
+      <p>Bpm limit window* = threshold in seconds exceeding a higher or lower bpm limit without 
+      triggering an emergency condition</p>
+      <p>Minimum delay* = Minimal delay between configured bpm extremes</p>
+
+      {% if request.user.is_staff %}
+        <p><strong>If you wish to modify one or more emergency detection parameters on the device,
+        please fill in the desired fields below:</strong></p>
+        <form action="{% url 'device_config_detail' device %}" method="post">
+        {% csrf_token %}
+        <label>Higher bpm limit:</a>
+        <input type="textfield" name="higher_bpm_limit"/><BR>
+        <label>Lower bpm limit:</a>
+        <input type="textfield" name="lower_bpm_limit"/><BR>
+        <label>Higher bpm elimit:</a>
+        <input type="textfield" name="higher_ebpm_limit"/><BR>
+        <label>Lower bpm elimit:</a>
+        <input type="textfield" name="lower_ebpm_limit"/><BR>
+        <label>Bpm limit window:</a>
+        <input type="textfield" name="bpm_limit_window"/><BR>
+        <label>Minimum delay:</a>
+        <input type="textfield" name="min_delay"/><BR>
+        <input type="submit" value="Modify device config" />
+        </form>
+        {% if device_updated %}
+          <p><strong>All specified fields were successfully updated.</strong></p>
+        {% else %}
+          {% if missing_field %}
+            <p><strong>Some fields could not be updated.</strong></p>
+          {% endif %}
+        {% endif %}
+        <BR>
+      {% endif %}
+
+      {% if qs_hist %}
+        <p><strong>Look up device records by date:</strong></p>
+        {% for dev_hist in qs_hist %}
+          <li><a href="{% url 'device_hist_detail' dev_hist.id %}">{{ dev_hist.date }}</a></li>
+        {% endfor %}
+      {% else %}
+        <p><strong>There are no records from this device yet.</strong></p>
+      {% endif %}
+    {% else %}
+      {% if device_id %}
+        <p><strong>Device with identifier '{{ device_id }}' not found</strong></p>
+      {% endif %}
+    {% endif %}
+    <BR>
+  {% endif %}
+  <a href="{% url 'index' %}">Back to main portal</a>
+{% else %}
+  <p>Log in to see this page</p>
+  <a href="{% url 'login' %}?next={{request.path}}">Log in</a>
+{% endif %}

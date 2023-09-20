@@ -1,0 +1,21 @@
+{% if request.user.is_authenticated %}
+  {% if request.user.is_staff %}
+    {% if patient_list %}
+      <p><strong>Below are the patients currently registered on the Monitoring System:</strong></p>
+      <ul>
+      {% for patient in patient_list %}
+        <li><a href="{% url 'patient_detail' patient.dni %}">{{ patient.name }} {{ patient.surname }}
+        </a></li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <h2>There are no patients currently registered in our system</h2>
+    {% endif %}
+  {% else %}
+    <p>Only authorised users can see this information</p>
+  {% endif %}
+  <a href="{% url 'index' %}">Back to main portal</a></p>
+{% else %}
+  <p>Log in as an authorised user to see this page</p>
+  <a href="{% url 'login' %}?next={{request.path}}">Log in</a>
+{% endif %}

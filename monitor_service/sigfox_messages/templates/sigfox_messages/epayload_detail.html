@@ -1,0 +1,37 @@
+{% if request.user.is_authenticated %}
+  {% if not_allowed %}
+    <p><strong>You're not allowed to see this information.</strong></p>
+  {% else %}
+    {% if epayload %}
+      <p><strong>Payload from emergency raised at '{{ epayload.emergency.emerg_date }}, 
+      {{ epayload.emergency.emerg_time }}':</strong></p>
+      <ul>
+      <li><strong>Payload reason of the emergency:</strong> {{ epayload.ereason_payload }}</li>
+      <li>Message type: {{ epayload.msg_type }}</li>
+      <li>Payload_format: {{ epayload.payload_format }} </li>
+      <li>Average bpm: {{ epayload.avg_bpm }} </li>
+      <li>Average ibi: {{ epayload.avg_ibi }} </li>
+      <li>Maximum bpm recorded: {{ epayload.max_bpm }} </li>
+      <li>Minimum bpm recorded: {{ epayload.min_bpm }} </li>
+      <li>Maximum ibi recorded: {{ epayload.max_ibi }} </li>
+      <li>Minimum ibi recorded: {{ epayload.min_ibi }} </li>
+      <li>Time distribution of bpm ranges on the interval:</li>
+      <ul>
+      <li>&lt;60 bpm: {{ epayload.lower_range }} %</li>
+      <li>[60-89] bpm: {{ epayload.second_range }}%</li>
+      <li>[90-120] bpm: {{ epayload.third_range }}%</li>
+      <li>&gt;120 bpm: {{ epayload.higher_range }}%</li>
+      </ul>
+      <li>Temperature record: {{ epayload.temp }}</li>
+      <li>Elapsed milliseconds: {{ epayload.elapsed_ms }}</li>
+      </ul>
+      <BR>
+    {% else %}
+      <p>Emergency payload data not found</p>
+    {% endif %}
+  {% endif %}
+  <BR>
+  <a href="{% url 'index' %}">Back to main portal</a></p>
+{% else %}
+    <a href="{% url 'login' %}?next={{request.path}}">Log in to see this page</a>
+{% endif %}

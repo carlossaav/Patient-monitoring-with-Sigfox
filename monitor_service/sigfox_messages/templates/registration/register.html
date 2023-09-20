@@ -1,0 +1,7 @@
+<h1>Welcome to Sifgox Patient Monitoring System</h1>
+<p>Please fill in the following form to sign in into our system:</p>
+<form method="post" action=".">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <input type="submit" value="Submit" />
+</form>

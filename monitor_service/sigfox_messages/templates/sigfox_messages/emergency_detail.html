@@ -1,0 +1,48 @@
+{% if request.user.is_authenticated %}
+  {% if not_allowed %}
+    <p><strong>You're not allowed to see this information.</strong></p>
+  {% else %}
+    {% if ebio %}
+      <p><strong>Biometrics gathered from patient '{{ ebio.patient.name }} {{ ebio.patient.surname }}', 
+      on the emergency raised at {{ ebio.emerg_date }}, {{ ebio.emerg_time }}:</strong></p>
+      <ul>
+      <li><strong>Emergency active:</strong> {{ ebio.active }}</li>
+      <li>Generated payloads on the emergency: {{ ebio.emsg_count }}</li>
+      <li>Average bpm: {{ ebio.avg_bpm }} </li>
+      <li>Average ibi: {{ ebio.avg_ibi }} </li>
+      <li>Maximum bpm recorded: {{ ebio.max_bpm }} </li>
+      <li>Minimum bpm recorded: {{ ebio.min_bpm }} </li>
+      <li>Maximum ibi recorded: {{ ebio.max_ibi }} </li>
+      <li>Minimum ibi recorded: {{ ebio.min_ibi }} </li>
+      <li>Time distribution of bpm ranges over the emergency:</li>
+      <ul>
+      <li>&lt;60 bpm: {{ ebio.lower_range }} %</li>
+      <li>[60-89] bpm: {{ ebio.second_range }}%</li>
+      <li>[90-120] bpm: {{ ebio.third_range }}%</li>
+      <li>&gt;120 bpm: {{ ebio.higher_range }}%</li>
+      </ul>
+      <li>Last temperature recorded: {{ ebio.last_temp }} </li>
+      <li>Average temperature: {{ ebio.avg_temp }} </li>
+      <li>Maximum temperature recorded: {{ ebio.max_temp }} </li>
+      <li>Minimum temperature recorded: {{ ebio.min_temp }} </li>
+      </ul>
+      {% if epayload_qs %}
+        <p><strong>Generated payloads of the emergency:</strong></p>
+        <ul>
+        {% for epayload in epayload_qs %}
+          <a href="{% url 'epayload_detail' epayload.id %}">({{ epayload.msg_type }})
+          </a></p>
+        {% endfor %}
+        </ul>
+      {% else %}
+        <p><strong>There was an error fetching emergency payloads.</strong></p>
+      {% endif %}
+    {% else %}
+      <p>Emergency data not found</p>
+    {% endif %}
+  {% endif %}
+  <BR>
+  <a href="{% url 'index' %}">Back to main portal</a></p>
+{% else %}
+    <a href="{% url 'login' %}?next={{request.path}}">Log in to see this page</a>
+{% endif %}

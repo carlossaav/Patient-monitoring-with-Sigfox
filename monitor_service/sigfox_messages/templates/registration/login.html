@@ -1,0 +1,31 @@
+{% if form.errors %}
+  <p>Username and password doesn't match. Please, try again</p>
+{% endif %}
+
+{% if next %}
+  {% if user.is_authenticated %}
+  <p>Your account has no access to this page. Please, log in with an account with sufficient privileges.</p>
+  {% else %}
+  <p>Log in to see this page.</p>
+  {% endif %}
+{% endif %}
+
+<form method="post" action="{% url 'login' %}">
+{% csrf_token %}
+<table>
+<tr>
+  <td>{{ form.username.label_tag }}</td>
+  <td>{{ form.username }}</td>
+</tr>
+<tr>
+  <td>{{ form.password.label_tag }}</td>
+  <td>{{ form.password }}</td>
+</tr>
+</table>
+
+<input type="submit" value="Access" />
+<input type="hidden" name="next" value="{{ next }}" />
+</form>
+
+<p>You don't have an account yet? Sign in here:
+<a href="{% url 'register' %}">Sign in</a></p>

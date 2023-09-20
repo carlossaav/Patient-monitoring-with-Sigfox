@@ -1,0 +1,43 @@
+{% if request.user.is_authenticated %}
+  {% if not_allowed %}
+    <p><strong>You're not allowed to see this information.</strong></p>
+  {% else %}
+    {% if bio %}
+      {% if today %}
+        <p><strong>Today's biometrics from patient '{{ bio.patient.name }}  
+        {{ bio.patient.surname }}':</strong></p>
+      {% else %}
+        <p><strong>Biometrics gathered from patient '{{ bio.patient.name }} 
+        {{ bio.patient.surname }}', on date '{{ bio.date}}':</strong></p>
+      {% endif%}
+      <ul>
+      <li>Average bpm: {{ bio.avg_bpm }} </li>
+      <li>Average ibi: {{ bio.avg_ibi }} </li>
+      <li>Maximum bpm recorded: {{ bio.max_bpm }}</li>
+      <li>Minimum bpm recorded: {{ bio.min_bpm }}</li>
+      <li>Maximum ibi recorded: {{ bio.max_ibi }}</li>
+      <li>Minimum ibi recorded: {{ bio.min_ibi }}</li>
+      <li>Time distribution of bpm ranges on the day:</li>
+      <ul>
+      <li>&lt;60 bpm: {{ bio.lower_range }} %</li>
+      <li>[60-89] bpm: {{ bio.second_range }}%</li>
+      <li>[90-120] bpm: {{ bio.third_range }}%</li>
+      <li>&gt;120 bpm: {{ bio.higher_range }}%</li>
+      </ul>
+      <li>Last temperature recorded: {{ bio.last_temp }}</li>
+      <li>Average temperature: {{ bio.avg_temp }}</li>
+      <li>Maximum temperature recorded: {{ bio.max_temp }}</li>
+      <li>Minimum temperature recorded: {{ bio.min_temp }}</li>
+      <li>Last ALARM message time: {{ bio.last_alarm_time }}</li>
+      <li>Last LIMITS message time: {{ bio.last_limit_time }}</li>
+      <li>Last emergency limit detection time: {{ bio.last_elimit_time }}</li>
+      </ul>
+      <BR>
+    {% else %}
+      <p>Requested biometrics data not found</p>
+    {% endif %}
+  {% endif %}
+  <a href="{% url 'index' %}">Back to main portal</a></p>
+{% else %}
+    <a href="{% url 'login' %}?next={{request.path}}">Log in to see this page</a>
+{% endif %}
