@@ -24,21 +24,17 @@
         {% endif %}
       {% endif %}
 
-      {% if patient_att_req %}
+      {% if att_req_qs %}
         <p><strong>Below there's a list of unattended requests from patients that require
         your attention:</strong><p>
-        {% for att_req_list in patient_att_req %}
-          {% for att_req in att_req_list %}
-            <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.patient.surname }}, 
-            {{ att_req.patient.name }}; {{ att_req.request_date }} {{ att_req.request_time }}
-            </a></li>
-          {% endfor %}
+        {% for att_req in att_req_qs %}
+          <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.patient }} {{ att_req }}
+          </a></li>
         {% endfor %}
       {% else %}
         <p><strong>There are no requests registered for you.</strong></p>     
       {% endif %}
     {% else %}
-      <BR>
       <p><strong>If you wish to manually request your doctor's attention, please fill in the
       fields below:</strong></p>
       <form action="{% url 'doctor_detail' doctor.id %}" method="post">
@@ -51,14 +47,24 @@
       <input type="submit" value="Request Doctor" /><BR>
       <BR>
       {% if invalid_priority %}
-        <p><strong>*</strong> Valid values for request priority are <strong>'Normal'</strong> 
+        <p><strong>*</strong>Valid values for request priority are <strong>'Normal'</strong> 
         or <strong>'Urgent'*</strong></p>
       {% else %}
-        {% if att_req_created %}
-          <p><strong> The request was successfully registered</strong></p>
+        {% if invalid_patient %}
+          <p><strong>The specified patient is not valid</strong></p>
         {% else %}
-          {% if invalid_patient %}
-            <p><strong>Specified patient is not valid</strong></p>
+          {% if not_available %}
+            <p><strong>Requested doctor is not available</strong></p>
+          {% else %}
+            {% if already_assigned %}
+              <p><strong>You've already registered one Attention Request. Wait until
+              it's marked as "Attended" by the related doctor to register a new one.
+              </strong></p>
+            {% else %}
+              {% if att_req_created %}
+                <p><strong> The request was successfully registered</strong></p>
+              {% endif %}
+            {% endif %}
           {% endif %}
         {% endif %}
       {% endif %}

@@ -40,7 +40,7 @@ class Doctor(models.Model):
   state = models.CharField(max_length=25)
 
   def __str__(self):
-    return self.name
+    return self.name + " " + self.surname
 
 
 class Patient(models.Model):
@@ -65,7 +65,6 @@ class Contact(models.Model):
   echat_state = models.CharField(max_length=50) # Chat's state
   phone_number = models.CharField(max_length=50) # For SMS contact
   sms_alerts = models.CharField(max_length=3)  # ("Yes/No")
-  # comm_status = models.CharField(max_length=25) # Emergency notification 'state' ("No emergencies"/"Notifying"/"Received")
 
   def __str__(self):
     return self.echat_id
@@ -75,6 +74,7 @@ class Patient_Contact(models.Model):
 
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
   contact = models.ForeignKey(Contact, on_delete=models.CASCADE)
+  comm_status = models.CharField(max_length=25) # Emergency notification 'state' ("Pending"/"Done")
 
   def __str__(self):
     return str(self.patient) + ", " + str(self.contact)
@@ -158,6 +158,7 @@ class Attention_request(models.Model):
 
   emergency = models.OneToOneField(Emergency_Biometrics, on_delete=models.SET_NULL, blank=True, null=True)
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
+  doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, blank=True, null=True)
 
   request_date = models.CharField(max_length=10) # dd/mm/yy format
   request_time = models.CharField(max_length=8) # hh:mm:ss format
@@ -166,24 +167,14 @@ class Attention_request(models.Model):
 #  emerg_state = models.CharField(max_length=25)
 
   def __str__(self):
-    return str(self.emergency) + ", " + str(self.patient)
-
-
-# class Doctor_Request(models.Model):
-
-  # attention_request = models.OneToOneField(Attention_request, on_delete=models.CASCADE, primary_key=True)
-  # doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, blank=True, null=True)
-  # patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-  # request_state = models.CharField(max_length=25) # ("Pending/Accepted")
-
-  # def __str__(self):
-    # return str(self.attention_request) + ", " + str(self.doctor)
+    return ("(" + str(self.request_priority) + "): "
+            + str(self.request_date) + ", " + str(self.request_time))
 
 
 class Biometrics(models.Model):
 
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-  date = models.CharField(max_length=10) # dd/mm/yy format
+  date = models.CharField(max_length=15) # dd/mm/yy format
 
   avg_bpm = models.CharField(max_length=3)
   avg_ibi = models.CharField(max_length=5)

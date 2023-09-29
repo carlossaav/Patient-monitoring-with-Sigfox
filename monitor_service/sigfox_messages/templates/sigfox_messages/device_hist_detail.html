@@ -3,7 +3,9 @@
     <p><strong>You're not allowed to see this information.</strong></p>
   {% else %}
     {% if dev_hist %}
-      <p><strong>Activity log of device '{{ dev_hist.dev_conf }}' on date {{ dev_hist.date }}:</strong></p>
+      <p><strong>Activity log of device ' 
+      <a href="{% url 'device_config_detail' dev_hist.dev_conf %}">
+      {{ dev_hist.dev_conf }}</a>' on date {{ dev_hist.date }}:</strong></p>
       <ul>
       <li>Running since: {{ dev_hist.running_since }} </li>
       <li>Last message sent at: {{ dev_hist.last_msg_time }} </li>

@@ -11,7 +11,7 @@
       <li>Linked Device: <a href="{% url 'device_config_detail' patient.dev_conf %}">
       {{ patient.dev_conf }}</a></li>
       <li>Doctor's full name: <a href="{% url 'doctor_detail' patient.doctor.id %}">
-      {{ patient.doctor.name }} {{ patient.doctor.surname }}</a></li>
+      {{ patient.doctor }}</a></li>
       <li>Age: {{ patient.age }}</li>
       <li>Follow_up: {{ patient.follow_up }}</li>
       {% if phone_numbers %}
@@ -64,7 +64,7 @@
       {% endif %}
 
       {% if bio_list %}
-        <p>Check out patient's biometric history.:</p>
+        <p>Check out patient's biometric history:</p>
         <ul>
         {% for bio in bio_list %}
           <li><a href="{% url 'biometrics_detail' bio.id %}">{{bio.date}}</a></li>

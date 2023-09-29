@@ -3,8 +3,10 @@
     <p><strong>You're not allowed to see this information.</strong></p>
   {% else %}
     {% if ebio %}
-      <p><strong>Biometrics gathered from patient '{{ ebio.patient.name }} {{ ebio.patient.surname }}', 
-      on the emergency raised at {{ ebio.emerg_date }}, {{ ebio.emerg_time }}:</strong></p>
+      <p><strong>Biometrics gathered from patient '
+      <a href="{% url 'patient_detail' ebio.patient %}">{{ ebio.patient.name }} 
+      {{ ebio.patient.surname }}</a>' on the emergency triggered at 
+      {{ ebio.emerg_date }}, {{ ebio.emerg_time }}:</strong></p>
       <ul>
       <li><strong>Emergency active:</strong> {{ ebio.active }}</li>
       <li>Generated payloads on the emergency: {{ ebio.emsg_count }}</li>

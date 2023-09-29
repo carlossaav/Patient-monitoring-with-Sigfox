@@ -2,8 +2,9 @@
   {% if request.user.is_staff %}
     {% if doctor %}
       {% if patient_qs %}
-        <p><strong>Below are the patients currently related to doctor '{{ doctor.name }} 
-        {{doctor.surname}}':</strong></p>
+        <p><strong>Below are the patients currently related to doctor '
+        <a href="{% url 'doctor_detail' doctor.id %}">{{ doctor.name }} 
+        {{ doctor.surname }}</a>':</strong></p>
         <ul>
         {% for patient in patient_qs %}
           <li><a href="{% url 'patient_detail' patient.dni %}">{{ patient.name }} 

@@ -3,7 +3,9 @@
     <p><strong>You're not allowed to see this information.</strong></p>
   {% else %}
     {% if patient %}
-      <p><strong>Information from device linked to patient <a href="{% url 'patient_detail' patient.dni %}">'{{ patient.name }} {{patient.surname}}'</a>:</strong></p>
+      <p><strong>Information from device linked to patient '
+      <a href="{% url 'patient_detail' patient.dni %}">{{ patient.name }} {{patient.surname}}
+      </a>':</strong></p>
     {% else %}
       {% if failed_patient %}
         <p><strong>**This device has not been linked to any patient yet**</strong></p>
@@ -17,7 +19,7 @@
       <li>Higher bpm limit configured to trigger emergency: {{ device.higher_ebpm_limit }} </li>
       <li>Lower bpm limit configured to trigger emergency: {{ device.lower_ebpm_limit }} </li>
       <li>Bpm limit window* (in seconds): {{ device.bpm_limit_window }} </li>
-      <li>Minimum delay*: {{ device.min_delay }} </li>
+      <li>Minimum delay* (in seconds): {{ device.min_delay }} </li>
       </ul>
       <p>Bpm limit window* = threshold in seconds exceeding a higher or lower bpm limit without 
       triggering an emergency condition</p>

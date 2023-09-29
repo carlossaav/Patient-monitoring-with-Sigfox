@@ -215,8 +215,7 @@ def uplink(request):
       longitude = loc_info["lng"]
       print(f"type(longitude) = {type(longitude)}")
       print(f"longitude = {longitude}")
-      # location = google_maps call (i.e "Calle San Juan, Zamora") // Consultar que posibilidades ofrece el API
-      # No llamar al API cada vez que recibes un mensaje (demasiadas llamadas). Hacerlo bien cuando cambien las coordenadas(implica almacenar coordenadas y comparar # las recibidas con las almacenadas) o consultar cada cierto tiempo (1 vez cada 20 minutos en condiciones normales y una cada 5' en emergencias, por ejemplo)
+      # location = google_maps API call?? (i.e "Calle San Juan, Zamora") # Check out Google Maps API possibilities
       dev_hist.last_known_latitude = str(latitude)
       dev_hist.last_known_longitude = str(longitude)
       # dev_hist.last_known_location = str(location)
@@ -229,14 +228,19 @@ def uplink(request):
 
 
   if new_e: # create new emergency, Attention request
-    ebio = models.Emergency_Biometrics(patient=patient, emerg_date=date, emerg_time=rtc,
-                                       emsg_count="0", active="Yes")
-    att_req = models.Attention_request(emergency=ebio, patient=patient, request_date=date,
-                                       request_time=rtc, request_priority="Urgent",
+    ebio = models.Emergency_Biometrics(patient=patient,
+                                       emerg_date=date,
+                                       emerg_time=rtc,
+                                       emsg_count="0",
+                                       active="Yes")
+    att_req = models.Attention_request(emergency=ebio,
+                                       patient=patient,
+                                       doctor=patient.doctor,
+                                       request_date=date,
+                                       request_time=rtc,
+                                       request_priority="Urgent",
                                        status="Unattended")
-    # doctor_req = models.Doctor_Request(attention_request=att_req, patient=patient,
-                                         # doctor=patient.doctor, request_state="Pending")
-    p = Process(target=utils.notifier, args=(att_req, patient, date, rtc, ))
+    p = Process(target=utils.notifier, args=(patient, ))
     p.start()
 
 
@@ -425,7 +429,6 @@ def uplink(request):
     epayload.save()
   if new_e:
     att_req.save()
-    # doctor_req.save()
   if new_hist:
     models.Patient_Device_History.objects.create(dev_hist=dev_hist, patient=patient)
 
@@ -539,9 +542,12 @@ def index(request):
       doctors_qs = models.Doctor.objects.filter(state="available")
       patients_qs = models.Patient.objects.filter(user=request.user)
       for patient in patients_qs:
-        ebio = models.Emergency_Biometrics.objects.filter(patient=patient).last()
-        if ((ebio != None) and (ebio.active == "Yes")):
-          emergency_list.append(ebio)
+        try:
+          ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_date", "emerg_time")
+          if (ebio.active == "Yes"):
+            emergency_list.append(ebio)
+        except models.Emergency_Biometrics.DoesNotExist:
+          pass
 
       if (doctors_qs.exists()):
         context["doctors_list"] = doctors_qs
@@ -614,39 +620,39 @@ def patient_detail(request, patient_id):
       if ((not request.user.is_staff) and (request.user != patient.user)):
         return render(request, "sigfox_messages/patient_detail.html",
                       context={"not_allowed": 1})
-      context["bio_24"] = models.Biometrics_24.objects.get(patient=patient)
       pcontacts = models.Patient_Contact.objects.filter(patient=patient)
       contact_list = []
       for pcontact in pcontacts:
         contact_list.append(pcontact.contact.phone_number)
       context["phone_numbers"] = contact_list
+      context["bio_24"] = models.Biometrics_24.objects.get(patient=patient)
     except models.Patient.DoesNotExist:
       return render(request, "sigfox_messages/patient_detail.html",
                     context={"patient_id": patient_id})
     except models.Biometrics_24.DoesNotExist:
       pass
 
-    ebio = models.Emergency_Biometrics.objects.filter(patient=patient).last()
-    if (ebio != None):
-      try:
-        att_req = models.Attention_request.objects.get(emergency=ebio)
-      except models.Attention_request.DoesNotExist:
-        att_req = None
+    try:
+      ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_date", "emerg_time")
+      if (ebio.active == "Yes"):
+        context["ongoing_emergency"] = ebio
 
-      if ((att_req != None)
-          and (request.method == "GET")
-          and ("emergency_attended" in request.GET)
-          and (request.GET["emergency_attended"] == "true")):
+      att_req = models.Attention_request.objects.get(emergency=ebio)
+      if ((request.method == "GET") and
+          ("emergency_attended" in request.GET) and
+          (request.GET["emergency_attended"] == "true")):
         att_req.status = "Attended"
         att_req.save()
 
       if (ebio.active == "Yes"):
-        context["ongoing_emergency"] = ebio
-        if (att_req != None):
-          if (att_req.status == "Attended"):
-            context["attended"] = 1
-          else:
-            context["not_attended"] = 1
+        if (att_req.status == "Attended"):
+          context["attended"] = 1
+        else:
+          context["not_attended"] = 1
+    except models.Emergency_Biometrics.DoesNotExist:
+      pass
+    except models.Attention_request.DoesNotExist:
+      pass
 
     emergency_list = models.Emergency_Biometrics.objects.filter(patient=patient)
     bio_list = models.Biometrics.objects.filter(patient=patient)
@@ -772,17 +778,10 @@ def doctor_detail(request, doctor_id):
       return render (request, "sigfox_messages/doctor_detail.html", context=context)
 
     if (request.user.is_staff):
-      patient_qs = models.Patient.objects.filter(doctor=doctor)
-      if (patient_qs.exists()):
-        patient_att_req = []
-        for patient in patient_qs:
-          pending_att_req = models.Attention_request.objects.filter(patient=patient,
-                                                                    status="Unattended")
-          if (pending_att_req.exists()):
-            patient_att_req.append(pending_att_req)
-
-        if (patient_att_req != []):
-          context["patient_att_req"] = patient_att_req
+      att_req_qs = models.Attention_request.objects.filter(doctor=doctor,
+                                                           status="Unattended")
+      if (att_req_qs.exists()):
+        context["att_req_qs"] = att_req_qs
 
       if (request.method == "POST" and
           "doctor state" in request.POST):
@@ -804,12 +803,23 @@ def doctor_detail(request, doctor_id):
           patient_qs = models.Patient.objects.filter(user=request.user)
           if ((patient_qs.exists()) and
               (patient in patient_qs)):
-            models.Attention_request.objects.create(patient=patient,
-                                                    emergency=None,
-                                                    request_date=date,
-                                                    request_time=rtc,
-                                                    request_priority=request.POST["request priority"],
-                                                    status="Unattended")
+            if (doctor.state == "available"):
+              att_req_qs = models.Attention_request.objects.filter(emergency=None,
+                                                                   patient=patient,
+                                                                   status="Unattended")
+              if (not att_req_qs.exists()):
+                models.Attention_request.objects.create(emergency=None,
+                                                        patient=patient,
+                                                        doctor=doctor,
+                                                        request_date=date,
+                                                        request_time=rtc,
+                                                        request_priority=request.POST["request priority"],
+                                                        status="Unattended")
+                context["att_req_created"] = 1
+              else:
+                context["already_assigned"] = 1
+            else:
+              context["not_available"] = 1
           else:
             invalid_patient = 1
         except models.Patient.DoesNotExist:
@@ -817,8 +827,6 @@ def doctor_detail(request, doctor_id):
 
         if invalid_patient:
           context["invalid_patient"] = 1
-        else:
-          context["att_req_created"] = 1
       else:
         context["invalid_priority"] = 1
 

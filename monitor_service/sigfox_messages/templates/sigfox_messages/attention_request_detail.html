@@ -3,12 +3,15 @@
     <p><strong>You're not allowed to see this information.</strong></p>
   {% else %}
     {% if att_req %}
-      <p><strong>Patient '{{att_req.patient.name}} {{att_req.patient.surname}}' requested
+      <p><strong>Patient '<a href="{% url 'patient_detail' att_req.patient %}">
+      {{ att_req.patient.name }} {{ att_req.patient.surname }}</a>' requested
       attention from our medical team. Request information:</strong></p>
       <ul>
       <li>Request date: {{ att_req.request_date }}</li>
       <li>Request time: {{ att_req.request_time }}</li>
       <li>Request type ("Normal/"Urgent"): {{ att_req.request_priority }}</li>
+      <li>Assigned doctor: <a href="{% url 'doctor_detail' att_req.doctor.id %}">
+      {{ att_req.doctor }}</a></li>
       <li>Request state ("Attended"/"Unattended"): {{ att_req.status }} </li>
       </ul>
       {% if not_attended %}

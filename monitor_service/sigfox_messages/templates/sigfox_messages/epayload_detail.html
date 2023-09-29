@@ -3,8 +3,10 @@
     <p><strong>You're not allowed to see this information.</strong></p>
   {% else %}
     {% if epayload %}
-      <p><strong>Payload from emergency raised at '{{ epayload.emergency.emerg_date }}, 
-      {{ epayload.emergency.emerg_time }}':</strong></p>
+      <p><strong>Payload raised on emergency '
+      <a href="{% url 'emergency_detail' epayload.emergency %}">
+      {{ epayload.emergency.emerg_date }}, {{ epayload.emergency.emerg_time }}</a>':
+      </strong></p>
       <ul>
       <li><strong>Payload reason of the emergency:</strong> {{ epayload.ereason_payload }}</li>
       <li>Message type: {{ epayload.msg_type }}</li>

@@ -7,7 +7,6 @@ urlpatterns= [
   path('', views.index, name="index"),
   path('downlink/<dev_id>', views.downlink, name="downlink_req"),
   path('uplink/', views.uplink, name="uplink_req"),
-  # path('emergency_lookup/', views.emergency_lookup, name="emergency_lookup"),
   path('doctor_lookup/', views.doctor_lookup, name="doctor_lookup"),
   path('pdoctor_lookup/<int:doctor_id>', views.pdoctor_lookup, name="pdoctor_lookup"),
   path('patient_lookup/', views.patient_lookup, name="patient_lookup"),
