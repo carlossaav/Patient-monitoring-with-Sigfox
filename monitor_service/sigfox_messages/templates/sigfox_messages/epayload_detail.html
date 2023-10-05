@@ -5,7 +5,7 @@
     {% if epayload %}
       <p><strong>Payload raised on emergency '
       <a href="{% url 'emergency_detail' epayload.emergency %}">
-      {{ epayload.emergency.emerg_date }}, {{ epayload.emergency.emerg_time }}</a>':
+      {{ epayload.emergency }}</a>':
       </strong></p>
       <ul>
       <li><strong>Payload reason of the emergency:</strong> {{ epayload.ereason_payload }}</li>

@@ -1,5 +1,5 @@
 from django.urls import include, path
-from sigfox_messages import views, bot
+from sigfox_messages import bot, views
 
 urlpatterns= [
   path('register/', views.register, name="register"),
@@ -21,3 +21,5 @@ urlpatterns= [
   path('epayload/<int:epayload_id>', views.epayload_detail, name="epayload_detail"),
   path('att_req/<int:att_req_id>', views.att_req_detail, name="att_req_detail"),
 ]
+
+bot.main()

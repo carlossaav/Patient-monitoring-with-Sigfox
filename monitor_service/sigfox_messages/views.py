@@ -6,17 +6,18 @@ from http import HTTPStatus
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from sigfox_messages import utils, models, constants
+from sigfox_messages.bot import manager
 from multiprocessing import Process
 import asyncio, datetime, json
-
+from django.utils import timezone
 
 @require_GET
 @csrf_exempt
 def downlink(request, dev_id):
 
-  datetime_obj = datetime.datetime.now()
-  date = datetime_obj.strftime("%d/%m/%Y") # dd/mm/yy format
-  rtc = datetime_obj.strftime("%H:%M:%S")  # hh:mm:ss format
+  datetime_obj = timezone.make_aware(datetime.datetime.now())
+  date = datetime_obj.date()
+  rtc = datetime_obj.strftime("%H:%M:%S")
 
   try:
     dev_conf = models.Device_Config.objects.get(dev_id=dev_id)
@@ -25,10 +26,11 @@ def downlink(request, dev_id):
     raise Http404(output)
 
   try:
-    dev_hist = models.Device_History.objects.filter(dev_conf=dev_conf, date=date).get()
+    dev_hist = models.Device_History.objects.get(dev_conf=dev_conf, date=date)
   except models.Device_History.DoesNotExist:
     # Create new history for dev_conf.dev_id device
-    dev_hist = models.Device_History(dev_conf=dev_conf, date=date, running_since=rtc,
+    dev_hist = models.Device_History(dev_conf=dev_conf, date=date,
+                                     running_since=datetime_obj,
                                      uplink_count="0", downlink_count="0")
 
   dev_hist.downlink_count = str(int(dev_hist.downlink_count) + 1)
@@ -62,17 +64,16 @@ def downlink(request, dev_id):
 @csrf_exempt
 def uplink(request):
 
-  datetime_obj = datetime.datetime.now()
-  date = datetime_obj.strftime("%d/%m/%Y") # dd/mm/yy format
-  rtc = datetime_obj.strftime("%H:%M:%S")  # hh:mm:ss format
+  datetime_obj = timezone.make_aware(datetime.datetime.now())
+  date = datetime_obj.date()
 
   try:
     print()
     print("(uplink) request.body =", request.body)
     body = json.loads(request.body)
-    print("body = json.loads(request.body)")
-    print("(uplink) body =", body)
-    print("(uplink) type(body) =", type(body))
+    # print("body = json.loads(request.body)")
+    # print("(uplink) body =", body)
+    # print("(uplink) type(body) =", type(body))
 
     dev_id = body["device"]
     payload = body["data"]
@@ -101,7 +102,8 @@ def uplink(request):
       qs = models.Device_History.objects.filter(dev_conf=dev_conf).order_by("-date")
       if (len(qs) > 1):
         migrate_bio = 1
-        last_date = qs[1].date # Get the latest date when an uplink message was sent (prior to this one)
+        # Get the latest date when an uplink message was sent (prior to this one)
+        last_date = qs[1].date
   except models.Device_History.DoesNotExist:
     new_hist = 1 # Create a new history entry for the device
     try:
@@ -111,8 +113,10 @@ def uplink(request):
     except models.Device_History.DoesNotExist:
       pass # No messages stored from this device. This is the first one
 
-    dev_hist = models.Device_History(dev_conf=dev_conf, date=date, running_since=rtc, last_msg_time=rtc,
-                                                    uplink_count="0", downlink_count="0")
+    dev_hist = models.Device_History(dev_conf=dev_conf, date=date,
+                                     running_since=datetime_obj,
+                                     last_msg_time=datetime_obj,
+                                     uplink_count="0", downlink_count="0")
 
   # Update uplink_count 
   dev_hist.uplink_count = str(int(dev_hist.uplink_count) + 1)
@@ -126,6 +130,7 @@ def uplink(request):
 
   if migrate_bio: # Migrate data on Biometrics_24 to Biometrics
     new_bio_24 = 1
+    print(f"last_date = {last_date}, flush=True")
     models.Biometrics.objects.create(patient=patient,
                                      date=last_date,
                                      avg_bpm=biometrics_24.avg_bpm, 
@@ -183,12 +188,10 @@ def uplink(request):
   if emergency:
     emerg_update = 1
   try:
-    ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_date", "emerg_time")
+    ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_timestamp")
     if emergency:
-      datetime_obj2 = datetime.datetime(int(ebio.emerg_date[6:]), int(ebio.emerg_date[3:5]),
-                                        int(ebio.emerg_date[:2]), int(ebio.emerg_time[:2]),
-                                        int(ebio.emerg_time[3:5]), int(ebio.emerg_time[6:]))
       # check emergency creation/reactivation
+      datetime_obj2 = ebio.emerg_timestamp
       seconds = utils.get_sec_diff(datetime_obj, datetime_obj2)
       if (seconds > constants.NEW_EMERG_DELAY):
         ebio.active = "No"
@@ -228,18 +231,21 @@ def uplink(request):
 
 
   if new_e: # create new emergency, Attention request
+    from sigfox_messages.bot import wait_emergency
+
     ebio = models.Emergency_Biometrics(patient=patient,
-                                       emerg_date=date,
-                                       emerg_time=rtc,
+                                       emerg_timestamp=datetime_obj,
                                        emsg_count="0",
                                        active="Yes")
     att_req = models.Attention_request(emergency=ebio,
                                        patient=patient,
                                        doctor=patient.doctor,
-                                       request_date=date,
-                                       request_time=rtc,
+                                       request_timestamp=datetime_obj,
                                        request_priority="Urgent",
                                        status="Unattended")
+    emerg_event = wait_emergency[patient.dni]
+    if (emerg_event.is_set()):
+      emerg_event.clear()
     p = Process(target=utils.notifier, args=(patient, ))
     p.start()
 
@@ -247,15 +253,14 @@ def uplink(request):
   if emergency:
     ebio.emsg_count = str(int(ebio.emsg_count) + 1)
 
-
   # Update biometrics timestamps
   if (msg_type == constants.ALARM_MSG):
-    biometrics_24.last_alarm_time = rtc
+    biometrics_24.last_alarm_time = datetime_obj
   elif (msg_type == constants.LIMITS_MSG):
-    biometrics_24.last_limit_time = rtc
+    biometrics_24.last_limit_time = datetime_obj
   elif (msg_type == constants.ALARM_LIMITS_MSG):
-    biometrics_24.last_alarm_time = rtc
-    biometrics_24.last_limit_time = rtc
+    biometrics_24.last_alarm_time = datetime_obj
+    biometrics_24.last_limit_time = datetime_obj
 
   # Retrieve format bits from rpv field
   payload_format = bin_data[10] + bin_data[21] + bin_data[32]  # payload format
@@ -322,9 +327,11 @@ def uplink(request):
 
     avg_bpm = utils.retrieve_field(bin_data, 40, 8)                    # Average Beats Per Minute
     print(f"(uplink) avg_bpm = {avg_bpm}")
-    utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None, datetime_obj, shipment_policy)
+    utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None,
+                         datetime_obj, shipment_policy)
     if emergency:
-      utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, None, ebio, datetime_obj, shipment_policy)
+      utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, None, ebio,
+                           datetime_obj, shipment_policy)
 
   # Next fields vary depending on which payload_format we're dealing with
 
@@ -339,8 +346,9 @@ def uplink(request):
       utils.update_bpm_ibi(dev_hist, "max_bpm", max_bpm, None, ebio)
       utils.update_bpm_ibi(dev_hist, "min_bpm", min_bpm, None, ebio)
 
-    if ((max_bpm > int(dev_conf.higher_ebpm_limit)) or (min_bpm < int(dev_conf.lower_ebpm_limit))):
-      biometrics_24.last_elimit_time = rtc
+    if ((max_bpm > int(dev_conf.higher_ebpm_limit)) or
+        (min_bpm < int(dev_conf.lower_ebpm_limit))):
+      biometrics_24.last_elimit_time = datetime_obj
 
   if (payload_format==0 or payload_format==2 or payload_format==4):
     if payload_format == 4: # 10 byte packet
@@ -356,11 +364,14 @@ def uplink(request):
   if (payload_format==2 or payload_format==3 or payload_format==6):
     avg_ibi = utils.retrieve_field(bin_data, 48, 16)                 # Average InterBeat Interval
     print(f"(uplink) avg_ibi = {avg_ibi}")
-    utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, biometrics_24, None, datetime_obj, shipment_policy)
+    utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, biometrics_24, None,
+                         datetime_obj, shipment_policy)
     if emergency:
-      utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, None, ebio, datetime_obj, shipment_policy)
+      utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, None, ebio,
+                           datetime_obj, shipment_policy)
 
-  if (payload_format==1 or payload_format==3 or payload_format==5 or payload_format==6):
+  if (payload_format==1 or payload_format==3 or
+      payload_format==5 or payload_format==6):
     max_ibi = utils.retrieve_field(bin_data, 64, 16)                 # Highest record of Interbeat interval
     print(f"(uplink) max_ibi = {max_ibi}")
     min_ibi = utils.retrieve_field(bin_data, 80, 16)                 # Lowest record of Interbeat interval
@@ -413,7 +424,7 @@ def uplink(request):
                                         temp=str(temp), elapsed_ms=str(elapsed_ms))
 
   # Update dev_hist fields
-  dev_hist.last_msg_time = rtc
+  dev_hist.last_msg_time = datetime_obj
   dev_hist.last_dev_state = "Functional"
   if (msg_type == constants.ERROR_MSG):
     if (payload_format == 4):
@@ -429,6 +440,7 @@ def uplink(request):
     epayload.save()
   if new_e:
     att_req.save()
+    emerg_event.set() # att_req, ebio and epayload saved to DB. Set event
   if new_hist:
     models.Patient_Device_History.objects.create(dev_hist=dev_hist, patient=patient)
 
@@ -501,8 +513,8 @@ def index(request):
               doctor = models.Doctor.objects.get(name=dname, surname=dsurname)
             except models.Doctor.DoesNotExist:
               output = "Doctor with name '" + request.POST['patient doctor']
-              output += "' has not been found in our Database.\nYou must first register such doctor before "
-              output += "adding its new patient."
+              output += "' has not been found in our Database.\nYou must first register such "
+              output += "doctor before adding its new patient."
               print(output)
               return render(request, "sigfox_messages/index.html", context={"error_message": output})
 
@@ -513,14 +525,17 @@ def index(request):
               err = 1
               output = "There's another patient on DB with dni '" + dni + "'. Registration failed"
             else:
-              # Now let's check if the device with the id provided has already been registered on database.
+              # Check if the device with the id provided has already been registered on database.
               qs = models.Device_Config.objects.filter(dev_id=request.POST['patient device id'])
               if (qs.exists()):
-                dev_conf = qs.get() # There must be only one element on the QuerySet, (primary key contraint)
-                qs = models.Patient.objects.filter(dev_conf=dev_conf) # Is this device already linked to any patient?
+                # There must be only one element on the QuerySet, (primary key contraint)
+                dev_conf = qs.get()
+                # Is this device already linked to any patient?
+                qs = models.Patient.objects.filter(dev_conf=dev_conf)
                 if (qs.exists()):
                   err = 1
-                  output = "There's another patient currently linked to that device. Registration failed"
+                  output = "There's another patient currently linked to that device."
+                  output += " Registration failed"
                 else: # expected behaviour
                   name = request.POST['patient name']
                   surname = request.POST['patient surname']
@@ -528,22 +543,25 @@ def index(request):
                   follow_up = request.POST['patient follow-up']
 
                   patient = models.Patient(dni=dni, name=name, surname=surname, age=age,
-                                            user=None, doctor=doctor, dev_conf=dev_conf,
-                                            follow_up=follow_up)
+                                           user=None, doctor=doctor, dev_conf=dev_conf,
+                                           follow_up=follow_up)
                   patient.save()
                   context["patient_registered"] = 1
+                  
+                  from sigfox_messages.bot import wait_emergency
+                  wait_emergency[patient.dni] = manager.Event()
               else:
                 err = 1
                 output = "Device with device id '" + request.POST['patient device id']
-                output += "' has not been found in our Database.\nYou must first register a new device with "
-                output += "such device identifier before adding a new patient."
+                output += "' has not been found in our Database.\nYou must first register a new "
+                output += " device with such device identifier before adding a new patient."
     else:
       emergency_list = []
       doctors_qs = models.Doctor.objects.filter(state="available")
       patients_qs = models.Patient.objects.filter(user=request.user)
       for patient in patients_qs:
         try:
-          ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_date", "emerg_time")
+          ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_timestamp")
           if (ebio.active == "Yes"):
             emergency_list.append(ebio)
         except models.Emergency_Biometrics.DoesNotExist:
@@ -633,7 +651,8 @@ def patient_detail(request, patient_id):
       pass
 
     try:
-      ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_date", "emerg_time")
+      ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_timestamp")
+      # print(f"emergency timestamp = {ebio.emerg_timestamp}")
       if (ebio.active == "Yes"):
         context["ongoing_emergency"] = ebio
 
@@ -765,9 +784,7 @@ def doctor_lookup(request):
 
 def doctor_detail(request, doctor_id):
 
-  datetime_obj = datetime.datetime.now()
-  date = datetime_obj.strftime("%d/%m/%Y") # dd/mm/yy format
-  rtc = datetime_obj.strftime("%H:%M:%S")  # hh:mm:ss format
+  datetime_obj = timezone.make_aware(datetime.datetime.now())
   context = {}
 
   if (request.user.is_authenticated):
@@ -811,8 +828,7 @@ def doctor_detail(request, doctor_id):
                 models.Attention_request.objects.create(emergency=None,
                                                         patient=patient,
                                                         doctor=doctor,
-                                                        request_date=date,
-                                                        request_time=rtc,
+                                                        request_timestamp=datetime_obj,
                                                         request_priority=request.POST["request priority"],
                                                         status="Unattended")
                 context["att_req_created"] = 1

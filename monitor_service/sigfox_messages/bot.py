@@ -2,14 +2,20 @@ from sigfox_messages import utils, models
 from telebot.async_telebot import AsyncTeleBot
 from telebot import types
 import asyncio
-from multiprocessing import Process, Manager, Event
+from multiprocessing import Process, Manager
+import sys, os
 
+try:
+  TELEBOT_TOKEN_ID = os.environ["TELEBOT_TOKEN_ID"]
+except KeyError:
+  print("There was an error while retrieving BOT'S TOKEN ID. EXITING.")
+  sys.exit()
 
-TOKEN_FILE = "token_id"
-with open(TOKEN_FILE, 'r') as file:
-  token_id = file.read()
+bot = AsyncTeleBot(TELEBOT_TOKEN_ID)
 
-bot = AsyncTeleBot(token_id)
+operations = {}
+options = []
+wait_emergency = {}
 
 # Share these dictionaries among Telgram's Bot polling process and notifier processes
 manager = Manager()
@@ -25,12 +31,6 @@ notifiers_lock = manager.Lock() # Lock to access "notifier_dict_lock"
 notifier_dict_lock = manager.dict() # Dict that associates one "notifier lock" to every chat
 notifier_dict = manager.dict() # Dict that stores the state of every chat ("Notifying/"Off")
 
-for contact in models.Contact.objects.all():
-  event_dict[contact.echat_id] = (manager.Event(), manager.Event(), manager.Event())
-  comm_status_dict_lock[contact.echat_id] = manager.Lock()
-  notifier_dict_lock[contact.echat_id] = manager.Lock()
-  notifier_dict[contact.echat_id] = "Off"
-
 
 async def send_message(echat_id, text):
   await bot.send_message(echat_id, text)
@@ -44,22 +44,24 @@ help_message = "Please issue '/help' command to get interactive help"
 stop_broadcast_msg = "In order to interact with me, you must first stop alert broadcasting to this phone "
 stop_broadcast_msg += "for the current emergencies to be marked as 'Received', so please issue '/stop' command"
 
-stopped_message = "---ALERT SYSTEM STOPPED---\n\n"
-stopped_message += "If you want to get the latest patient biometrics, visit "
-stopped_message += "http://ec2-18-216-53-173.us-east-2.compute.amazonaws.com:8000/sigfox_messages\n\n"
-stopped_message += "---ALERT SYSTEM STOPPED---"
+STOPPED_MESSAGE = "---ALERT SYSTEM STOPPED---\n\n"
+STOPPED_MESSAGE += "If you want to get the latest patient biometrics, visit "
+STOPPED_MESSAGE += "http://ec2-18-216-53-173.us-east-2.compute.amazonaws.com:8000/sigfox_messages\n\n"
+STOPPED_MESSAGE += "---ALERT SYSTEM STOPPED---"
+
 
 help_list = """
 
 1) Register this telephone to get the emergency notifications:\n'/start' command
 2) Stop all alerts to this telephone for the current emergencies:\n'/stop' command
 3) Enable/Disable SMS alert messages on this phone:\n'/SMS' command
-4) Follow up more patients on this phone:\n'/add' command
-5) Stop following a specific patient\n'/unfollow' command
-6) Erase this number from Monitor Service:\n'/del' command
-7) Show patients linked to this phone and SMS configuration:\n'/show' command
-8) Get this help message:\n'/help' command
-9) Exit this dialogue:\n'/exit' command
+4) Get some patient's latest location along with other info:\n'/locate' command
+5) Follow up more patients on this phone:\n'/add' command
+6) Stop following a specific patient\n'/unfollow' command
+7) Erase this number from Monitor Service:\n'/del' command
+8) Show patients linked to this phone and SMS configuration:\n'/show' command
+9) Get this help message:\n'/help' command
+10) Exit this dialogue:\n'/exit' command
 
 Please type the operation's number or related command: """
 
@@ -81,7 +83,7 @@ input_states = [WAIT_CONTACT, WAIT_NAME_INPUT, WAIT_PATIENT_CONFIRM, WAIT_DNI_IN
 wait_name_dict = {}
 wait_del_dict = {}
 wait_unfollow_dict = {}
-
+wait_loc_patient = {}
 
 @bot.message_handler(commands=["stop"])
 async def handle_stop_command(message):
@@ -240,6 +242,34 @@ async def add_patient(message):
   await bot.reply_to(message, reply)
 
 
+async def locate(patient):
+  pass
+
+async def perform_location(contact, message):
+
+  dloc = wait_loc_patient[contact.echat_id]
+  pat_found = 0
+  for e in dloc:
+    pat = dloc[e]
+    pat_name = pat.name + " " + pat.surname
+    if ((message.text == e) or (message.text == pat_name)):
+      pat_found = 1
+      patient = pat
+      break
+
+  contact.echat_state = SPAWN_CONFIG
+  del(wait_loc_patient[contact.echat_id])
+
+  if pat_found:
+    await utils.send_dev_data(contact, patient)
+    await contact.asave()
+    reply = None
+  else:
+    reply = "Supplied number or patient's name is not on the list. Exiting."
+
+  return contact, reply
+
+
 @bot.message_handler(commands=["locate"])
 async def locate_patient(message):
 
@@ -248,12 +278,24 @@ async def locate_patient(message):
     await bot.reply_to(message, reply)
     return
 
-  # All conditions were met, ask for the patient's name to perform 'add' operation
-  contact.echat_state = WAIT_NAME_INPUT
-  wait_name_dict[contact.echat_id] = ("locate", None)
-  await contact.asave()
   reply = "Would you like to get some patient's latest recorded location? Alright, "
-  reply += "please provide me with the name of the patient you're asking for:"
+  reply += "below you'll see the list of patients you're actually monitoring on this telephone:\n\n"
+  i = 1
+  wait_loc_patient[contact.echat_id] = {}
+  dloc = wait_loc_patient[contact.echat_id]
+  pcontact_qs = await utils.async_Patient_Contact_filter(contact=contact)
+  async for pcontact in pcontact_qs:
+    patient = await utils.async_my_get_attr(pcontact, "patient")
+    dloc[str(i)] = patient
+    reply += str(i) + ") " + patient.name + " " + patient.surname + ", with dni '" + patient.dni + "'\n"
+    i += 1
+
+  wait_loc_patient[contact.echat_id] = dloc  
+  reply += "\nWhich one would you like to locate?: (name/number)"
+
+  # All conditions were met, ask for the patient's name to perform 'locate' operation
+  contact.echat_state = WAIT_NAME_INPUT
+  await contact.asave()
 
   await bot.reply_to(message, reply)
 
@@ -427,8 +469,8 @@ async def confirm_operation(contact, text, chat_state):
           contact.echat_state = SPAWN_CONFIG
           reply += goodbye_msg
       except KeyError:
-        reply = "There was an error while indexing the patient. Please try again by issuing /start command or "
-        reply += "/help to get interactive help"
+        reply = "There was an error while indexing the patient. Please try again by issuing '/start' command or "
+        reply += "'/help' to get interactive help"
         contact.echat_state = SPAWN_CONFIG
     elif (chat_state == WAIT_SMS_CONF):
       contact.sms_alerts = "Yes"
@@ -445,7 +487,7 @@ async def confirm_operation(contact, text, chat_state):
       notifier = notifier_dict_lock[echat_id]
       notifier.acquire()
       del(notifier_dict[echat_id]) # Delete notifer's chat state value
-      del(notifier_dict_lock[echat_id]) # Delete notifer lock of the chat 
+      del(notifier_dict_lock[echat_id]) # Delete notifer lock of the chat from dict
       notifier.release()
       notifiers_lock.release()
       comm_statuses_lock.acquire()
@@ -472,24 +514,6 @@ async def confirm_operation(contact, text, chat_state):
   return contact, reply
 
 
-operations = {}
-options = []
-for e in range(1, 11):
-  options.append(str(e))
-
-commands = ["/start", "/stop", "/SMS", "/locate", "/add", "/unfollow", "/show",
-            "/del", "/help", "/exit"]
-functions = [init_dialogue, handle_stop_command, setup_sms, locate_patient,
-             add_patient, handle_unfollow, show_patients, delete_number,
-             init_dialogue, exit_dialogue]
-i = 0
-for e in options:
-  operations[e] = commands[i], functions[i]
-  i += 1
-
-print(operations)
-
-
 @bot.message_handler(content_types=["contact"])
 async def config_number(message):
 
@@ -504,7 +528,9 @@ async def config_number(message):
 
   # Save contact's phone number
   contact.echat_state = WAIT_NAME_INPUT
-  contact.phone_number = message.contact.phone_number
+  contact.phone_number = str(message.contact.phone_number)
+  if (contact.phone_number[0] != '+'):
+    contact.phone_number = '+' + contact.phone_number
   await contact.asave()
 
   wait_name_dict[contact.echat_id] = ("start", None)
@@ -515,31 +541,32 @@ async def config_number(message):
   await bot.reply_to(message, reply)
 
 
-async def checkout_command(patient, contact, command):
+async def name_checkout(contact, patient):
 
+  if (patient == None or contact == None):
+    contact.echat_state = SPAWN_CONFIG
+    del(wait_name_dict[contact.echat_id])
+    reply = "Operation failed. Exiting."
+    return contact, reply
+
+  command, _ = wait_name_dict[contact.echat_id]
   qs = await utils.async_Patient_Contact_filter(patient=patient, contact=contact)
   exists = await qs.aexists() # Check whether that patient is already linked to this chat
-  if (command == "start" or command == "add"):
-    if not exists:
-      command, _ = wait_name_dict[contact.echat_id]
-      wait_name_dict[contact.echat_id] = command, patient
-      contact.echat_state = WAIT_PATIENT_CONFIRM
-      reply = "Quite so, we've found a patient, named '" + patient.name + " " + patient.surname
-      reply += "', with dni '" + patient.dni + "' in our database. Can you please confirm this is the"
-      reply += " patient you're asking for? [yes/no]:"
-    else:
-      reply = "This number has already been registered for patient '" + patient.name + " " + patient.surname
-      reply += "', dni '" + patient.dni + "'. Issue '/show' command if you want to get a list of the"
-      reply += " patients tracked from this phone."
-      del(wait_name_dict[contact.echat_id])
-      contact.echat_state = SPAWN_CONFIG
-  elif (command == "locate"):
-    if (not exists):
-      pass
-    else:
-      pass
+  if not exists:
+    wait_name_dict[contact.echat_id] = command, patient
+    contact.echat_state = WAIT_PATIENT_CONFIRM
+    reply = "Quite so, we've found a patient, named '" + patient.name + " " + patient.surname
+    reply += "', with dni '" + patient.dni + "' in our database. Can you please confirm this is the"
+    reply += " patient you're asking for? [yes/no]:"
+  else:
+    reply = "This number has already been registered for patient '" + patient.name + " "
+    reply += patient.surname + "', dni '" + patient.dni + "'. Issue '/show' command if you want to"
+    reply += " get a list of the patients tracked from this phone."
+    del(wait_name_dict[contact.echat_id])
+    contact.echat_state = SPAWN_CONFIG
 
-  return contact
+  return contact, reply
+
 
 @bot.message_handler(content_types=["text"])
 async def config(message):
@@ -558,61 +585,38 @@ async def config(message):
     contact.echat_state = SPAWN_CONFIG
     reply = "We were expecting for your contact, but got some text input. Plese, restart the process by issuing "
     reply += "'/start' command"
-  elif (contact.echat_state == WAIT_NAME_INPUT): # Patient configuration interaction
-    try:
+  elif (contact.echat_state == WAIT_NAME_INPUT): # User interaction
+    if (contact.echat_id in wait_loc_patient): # '/locate' command issued
+      contact, reply = await perform_location(contact, message)
+      if (reply == None):
+        return
+    else: # '/start' or '/add' command issued
       l = message.text.split()
       name = l[0]
       surname = ' '.join(l[1:])
-      patient = await models.Patient.objects.aget(name=name, surname=surname)
-      qs = await utils.async_Patient_Contact_filter(patient=patient, contact=contact)
-      exists = await qs.aexists() # Check whether that patient is already linked to this chat
-      if not exists:
-        command, _ = wait_name_dict[contact.echat_id]
-        wait_name_dict[contact.echat_id] = command, patient
-        contact.echat_state = WAIT_PATIENT_CONFIRM
-        reply = "Quite so, we've found a patient, named '" + patient.name + " " + patient.surname
-        reply += "', with dni '" + patient.dni + "' in our database. Can you please confirm this is the"
-        reply += " patient you're asking for? [yes/no]:"
-      else:
-        reply = "This number has already been registered for patient '" + patient.name + " " + patient.surname
-        reply += "', dni '" + patient.dni + "'. Issue '/show' command if you want to get a list of the"
-        reply += " patients tracked from this phone."
-        del(wait_name_dict[contact.echat_id])
+      try:
+        patient = await models.Patient.objects.aget(name=name, surname=surname)
+        contact, reply = await name_checkout(contact, patient)
+      except models.Patient.DoesNotExist:
+        reply = "No patients were found with that name. He/She might not be registered in our website yet."
+        reply += " Exiting process."
         contact.echat_state = SPAWN_CONFIG
-    except models.Patient.DoesNotExist:
-      reply = "No patients were found with that name. He/She might not be registered in our website yet."
-      reply += " Exiting process."
-      contact.echat_state = SPAWN_CONFIG
-      del(wait_name_dict[contact.echat_id])
-    except models.Patient.MultipleObjectsReturned:
-      reply = "Several patients were found with that name in our database. Please provide DNI of '"
-      reply += message.text + "':"
-      contact.echat_state = WAIT_DNI_INPUT
+        del(wait_name_dict[contact.echat_id])
+      except models.Patient.MultipleObjectsReturned:
+        reply = "Several patients were found with that name in our database. Please provide DNI of '"
+        reply += message.text + "':"
+        contact.echat_state = WAIT_DNI_INPUT
   elif (contact.echat_state == WAIT_PATIENT_CONFIRM): # Patient's confirmation expected
     contact, reply = await confirm_operation(contact, message.text, WAIT_PATIENT_CONFIRM)
   elif (contact.echat_state == WAIT_DNI_INPUT): # DNI expected as input
     try:
       patient = await models.Patient.objects.aget(dni=message.text) # Primary key
-      qs = await utils.async_Patient_Contact_filter(patient=patient, contact=contact)
-      exists = await qs.aexists() # Check whether that patient is already linked to this chat
-      if not exists:
-        command, _ = wait_name_dict[contact.echat_id]
-        wait_name_dict[contact.echat_id] = command, patient
-        contact.echat_state = WAIT_PATIENT_CONFIRM
-        reply = "Quite so, we've found a patient, named '" + patient.name + " " + patient.surname
-        reply += "', with dni '" + patient.dni + "' in our database. Can you please confirm this is the"
-        reply += " patient you're asking for? [yes/no]"
-      else:
-        contact.echat_state = SPAWN_CONFIG
-        del(wait_name_dict[contact.echat_id])
-        reply = "This number has already been registered for patient '" + patient.name + " " + patient.surname
-        reply += "', dni '" + patient.dni + "'. Issue '/show' command if you want to get a list of the"
-        reply += " patients tracked from this phone."
+      contact, reply = await name_checkout(contact, patient)
     except models.Patient.DoesNotExist:
-      contact.echat_state = SPAWN_CONFIG
-      del(wait_name_dict[contact.echat_id])
       reply = "No matching patient for the dni provided. Please make sure you typed it correctly, then issue"
       reply += " the command again to restart the process"
+      contact.echat_state = SPAWN_CONFIG
+      del(wait_name_dict[contact.echat_id])
   elif (contact.echat_state == WAIT_SMS_OPTION):
     contact, reply = await check_sms_option(contact, message.text)
   elif(contact.echat_state == WAIT_SMS_CONF): # SMS confirmation expected
@@ -635,8 +639,9 @@ async def config(message):
       await func(msg)
       return
     else:
-      reply = "Please provide a correct operation number or related command: "
-
+      contact.echat_state = SPAWN_CONFIG
+      reply = "Invalid option."
+      
   if (contact != None): # delete_number() returns None contact
     await contact.asave()
 
@@ -654,24 +659,54 @@ async def default_err(message):
   await bot.reply_to(message, "Support only provided for text input. " + help_message)
 
 
+def restart_chats():
+
+  for contact in models.Contact.objects.all():
+    contact.echat_state = SPAWN_CONFIG
+    contact.save()
+    for pcontact in models.Patient_Contact.objects.filter(contact=contact):
+      pcontact.contact = contact
+      pcontact.comm_status = "Done"
+      pcontact.save()
+
+
+def launch_bot():
+
+  for e in range(1, 11):
+    options.append(str(e))
+
+  commands = ["/start", "/stop", "/SMS", "/locate", "/add", "/unfollow", "/show",
+              "/del", "/help", "/exit"]
+  functions = [init_dialogue, handle_stop_command, setup_sms, locate_patient,
+              add_patient, handle_unfollow, show_patients, delete_number,
+              init_dialogue, exit_dialogue]
+  i = 0
+  for e in options:
+    operations[e] = commands[i], functions[i]
+    i += 1
+
+  print(operations)
+  print()
+  asyncio.run(bot.polling())
+  # print("Bot polling finished")
+
 def main():
 
-  def restart_states():
-    for contact in models.Contact.objects.all():
-      contact.echat_state = SPAWN_CONFIG
-      contact.save()
-      for pcontact in models.Patient_Contact.objects.filter(contact=contact):
-        pcontact.contact = contact
-        pcontact.comm_status = "Done"
-        pcontact.save()
+  # One event per patient to wait for new emergencies to be saved on Database
+  for patient in models.Patient.objects.all():
+    wait_emergency[patient.dni] = manager.Event()
 
-  restart_states()
-  asyncio.run(bot.polling())
-#  print("Bot terminated")
+  # Populate shared dicts among bot and chat notifiers
+  contact_lock.acquire()
+  for contact in models.Contact.objects.all():
+    event_dict[contact.echat_id] = (manager.Event(), manager.Event(), manager.Event())
+    comm_status_dict_lock[contact.echat_id] = manager.Lock()
+    notifier_dict_lock[contact.echat_id] = manager.Lock()
+    notifier_dict[contact.echat_id] = "Off"
+  contact_lock.release()
 
-
-p = Process(target=main)
-p.start()
-
-print("\n--Yielding control to Django--")
-print()
+  restart_chats() # Restart chat states
+  p = Process(target=launch_bot)
+  p.start()
+  print("--Telegram Bot launched--\nYielding control to Django.")
+  print()

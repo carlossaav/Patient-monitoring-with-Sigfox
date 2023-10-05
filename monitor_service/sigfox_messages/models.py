@@ -18,9 +18,9 @@ class Device_Config(models.Model):
 class Device_History(models.Model):
 
   dev_conf = models.ForeignKey(Device_Config, on_delete=models.CASCADE)
-  date = models.CharField(max_length=10) # dd/mm/yy format
-  running_since = models.CharField(max_length=8) # hh:mm:ss format
-  last_msg_time = models.CharField(max_length=8) # hh:mm:ss format
+  date = models.DateField()
+  running_since = models.DateTimeField()
+  last_msg_time = models.DateTimeField()
   last_dev_state = models.CharField(max_length=25)
   last_known_latitude = models.CharField(max_length=25)
   last_known_longitude = models.CharField(max_length=25)
@@ -29,7 +29,7 @@ class Device_History(models.Model):
   downlink_count = models.CharField(max_length=3)
 
   def __str__(self):
-    return str(self.dev_conf) + self.date
+    return str(self.dev_conf) + str(self.date)
 
 
 class Doctor(models.Model):
@@ -92,8 +92,7 @@ class Patient_Device_History(models.Model):
 class Emergency_Biometrics(models.Model):
 
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-  emerg_date = models.CharField(max_length=10) # dd/mm/yy format
-  emerg_time = models.CharField(max_length=8) # hh:mm:ss format
+  emerg_timestamp = models.DateTimeField()
   emsg_count = models.CharField(max_length=2)
   active = models.CharField(max_length=5)
 
@@ -125,7 +124,7 @@ class Emergency_Biometrics(models.Model):
   min_temp = models.CharField(max_length=6)
   
   def __str__(self):
-    return str(self.id)
+    return str(self.emerg_timestamp)
 
 
 class Emergency_Payload(models.Model):
@@ -160,21 +159,19 @@ class Attention_request(models.Model):
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
   doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, blank=True, null=True)
 
-  request_date = models.CharField(max_length=10) # dd/mm/yy format
-  request_time = models.CharField(max_length=8) # hh:mm:ss format
+  request_timestamp = models.DateTimeField()
   request_priority = models.CharField(max_length=25) # ("Normal"/"Urgent")
   status = models.CharField(max_length=25) # ("Attended"/"Unattended")
 #  emerg_state = models.CharField(max_length=25)
 
   def __str__(self):
-    return ("(" + str(self.request_priority) + "): "
-            + str(self.request_date) + ", " + str(self.request_time))
+    return ("(" + str(self.request_priority) + "): " + str(self.request_timestamp))
 
 
 class Biometrics(models.Model):
 
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-  date = models.CharField(max_length=15) # dd/mm/yy format
+  date = models.DateField()
 
   avg_bpm = models.CharField(max_length=3)
   avg_ibi = models.CharField(max_length=5)
@@ -193,14 +190,15 @@ class Biometrics(models.Model):
   max_temp = models.CharField(max_length=6)
   min_temp = models.CharField(max_length=6)
 
-  last_alarm_time = models.CharField(max_length=8) # hh:mm:ss format
-  last_limit_time = models.CharField(max_length=8)
+  last_alarm_time = models.DateTimeField(blank=True, null=True)
+  last_limit_time = models.DateTimeField(blank=True, null=True)
 
-  # Look at max_bpm/min_bpm fields on LIMITS_MSG message, then update this field on database if proceeds. Important timestamp for the medical team.
-  last_elimit_time = models.CharField(max_length=8)
+  # Look at max_bpm/min_bpm fields on LIMITS_MSG message, then update this field on database if proceeds.
+  # Important timestamp for the medical team.
+  last_elimit_time = models.DateTimeField(blank=True, null=True)
 
   def __str__(self):
-    return str(self.patient) + ", " + self.date
+    return str(self.patient) + ", " + str(self.date)
 
 
 class Biometrics_24(models.Model):
@@ -233,11 +231,12 @@ class Biometrics_24(models.Model):
   max_temp = models.CharField(max_length=6)
   min_temp = models.CharField(max_length=6)
 
-  last_alarm_time = models.CharField(max_length=8) # hh:mm:ss format
-  last_limit_time = models.CharField(max_length=8)
+  last_alarm_time = models.DateTimeField(blank=True, null=True)
+  last_limit_time = models.DateTimeField(blank=True, null=True)
 
-  # Look at max_bpm/min_bpm fields on LIMITS_MSG message, then update this field on database if proceeds. Important timestamp for the medical team.
-  last_elimit_time = models.CharField(max_length=8)
+  # Look at max_bpm/min_bpm fields on LIMITS_MSG message, then update this field on database if proceeds.
+  # Important timestamp for the medical team.
+  last_elimit_time = models.DateTimeField(blank=True, null=True)
 
   def __str__(self):
     return str(self.patient)

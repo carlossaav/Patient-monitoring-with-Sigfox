@@ -1,7 +1,35 @@
 from sigfox_messages import models, constants
 from asgiref.sync import sync_to_async, async_to_sync
-import asyncio, datetime, struct
-from multiprocessing import Lock
+import asyncio, struct
+from twilio.rest import Client
+import os, sys, datetime
+
+ALARM_PUSHED = "alarm_pushed"
+EMERG_SPOTTED = "emergency_spotted"
+
+SMS_ALERT_MESSAGE = "\n--MONITORING SYSTEM ALERT--\n\nHello, we notify "
+SMS_ALERT_MESSAGE += "you for an emergency that has recently arisen in some of the"
+SMS_ALERT_MESSAGE += "patients you're currently monitoring. Check out your "
+SMS_ALERT_MESSAGE += "Telegram's chat for more info.\n\n--MONITORING SYSTEM ALERT--"
+
+# Get Twilio credentials
+try:
+  TWILIO_ACCOUNT_SID = os.environ['TWILIO_ACCOUNT_SID']
+  TWILIO_AUTH_TOKEN = os.environ['TWILIO_AUTH_TOKEN']
+except KeyError:
+  print("There was an error while retrieving TWILIO'S credentials. EXITING.")
+  sys.exit()
+
+# Create twilio client object
+client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
+def send_sms_alert(contact, message):
+
+  message = client.messages.create(from_=+12565784086,
+                                   to=contact.phone_number,
+                                   body=message)
+  print(f"Sending SMS to number {contact.phone_number}")
+  print(f"(SMS) message.status = {message.status}")
 
 
 def my_get_attr(obj, attr):
@@ -13,10 +41,14 @@ def my_set_attr(obj, attr, attr_value):
 async_my_get_attr = sync_to_async(my_get_attr, thread_sensitive=True)
 async_my_set_attr = sync_to_async(my_set_attr, thread_sensitive=True)
 
-async_Patient_Contact_filter = sync_to_async(models.Patient_Contact.objects.filter, thread_sensitive=True)
-async_Device_History_filter = sync_to_async(models.Device_History.objects.filter, thread_sensitive=True)
-async_Emergency_Payload_filter = sync_to_async(models.Emergency_Payload.objects.filter, thread_sensitive=True)
-async_Emergency_Biometrics_filter = sync_to_async(models.Emergency_Biometrics.objects.filter, thread_sensitive=True)
+async_Patient_Contact_filter = sync_to_async(models.Patient_Contact.objects.filter,
+                                             thread_sensitive=True)
+async_Device_History_filter = sync_to_async(models.Device_History.objects.filter,
+                                            thread_sensitive=True)
+async_Emergency_Payload_filter = sync_to_async(models.Emergency_Payload.objects.filter,
+                                               thread_sensitive=True)
+async_Emergency_Biometrics_filter = sync_to_async(models.Emergency_Biometrics.objects.filter,
+                                                  thread_sensitive=True)
 
 def retrieve_field(bin_data, index, length):
 
@@ -52,10 +84,8 @@ def get_attr_name(range_id):
 # Substract one day to the given date
 def delta(date):
 
-  dobj = datetime.date(int(date[6:]), int(date[3:5]), int(date[:2]))
   d = datetime.timedelta(1)
-  dobj = dobj - d
-  date = dobj.strftime("%d/%m/%Y")
+  date = date - d
 
   return date
 
@@ -136,7 +166,7 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
     return
 
   if (datetime_obj != None): # on average updates
-    date = datetime_obj.strftime("%d/%m/%Y")
+    date = datetime_obj.date()
 
   if ((msg_count > 1) and (getattr(bio, attr) != "")):
     if ((attr == "max_bpm") and (attr_value > int(bio.max_bpm))):
@@ -149,19 +179,17 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
       bio.min_ibi = str(attr_value)
     elif ((attr == "avg_bpm") or (attr == "avg_ibi")):
 
-      if ((ebio != None) and (int(dev_hist.uplink_count)==1)): # (ebio.emsg_count > 1), but it's the first message of the day
+      if ((ebio != None) and (int(dev_hist.uplink_count)==1)):
+        # (ebio.emsg_count > 1), but it's the first message of the day
         date = delta(date) # Purpose is getting the time of yesterday's last message
         try:
-          dev_hist = models.Device_History.objects.filter(dev_conf=dev_hist.dev_conf, date=date).get()
+          dev_hist = models.Device_History.objects.get(dev_conf=dev_hist.dev_conf, date=date)
         except models.Device_History.DoesNotExist:
+          print("There's no device history object created yesterday")
           return # This should never happen. Catch exception if it does, to continue.
 
-      datetime_obj2 = datetime.datetime(int(date[6:]), int(date[3:5]), int(date[:2]),
-                                        int(dev_hist.last_msg_time[:2]), int(dev_hist.last_msg_time[3:5]),
-                                        int(dev_hist.last_msg_time[6:]))
-      seconds = get_sec_diff(datetime_obj, datetime_obj2)      
+      seconds = get_sec_diff(datetime_obj, dev_hist.last_msg_time)
       # print(f"(uplink) seconds = {seconds}")
-
       if (seconds <= constants.MAX_TIME_DELAY):
         sum_field = "sum_" + attr[4:]
         time_field = attr[4:] + "_time"
@@ -201,12 +229,8 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
           # an EMERGENCY_SHIP_POLICY or a REGULAR_SHIP_POLICY.
           date = delta(date)
           try:
-            dev_hist = models.Device_History.objects.filter(dev_conf=dev_hist.dev_conf, date=date).get()
-            datetime_obj2 = datetime.datetime(int(date[6:]), int(date[3:5]), int(date[:2]),
-                                              int(dev_hist.last_msg_time[:2]), int(dev_hist.last_msg_time[3:5]),
-                                              int(dev_hist.last_msg_time[6:]))
-            seconds = get_sec_diff(datetime_obj, datetime_obj2)
-
+            dev_hist = models.Device_History.objects.get(dev_conf=dev_hist.dev_conf, date=date)
+            seconds = get_sec_diff(datetime_obj, dev_hist.last_msg_time)
             if (seconds <= constants.MAX_TIME_DELAY):
               setattr(bio, sum_field, str(attr_value * seconds * 500))
               setattr(bio, time_field, str(seconds))
@@ -216,16 +240,12 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
             pass
         else: # EMERGENCY_SHIP_POLICY
           # We don't have a way to determine how much time the device has been gathering samples since it booted up.
-          # We know 'x' falls within 0<x<=10'30", range, but we don't know it accurately, so we start measuring device's
-          # computing time from the second message onwards to update the average(s).
+          # We know 'x' falls within 0<x<=10'30", range, but we don't know it accurately, so we start measuring
+          # device's computing time from the second message onwards to update the average(s).
           pass
 
       elif ((ebio != None) and (int(dev_hist.uplink_count) > 1)): # (ebio.emsg_count == 1)
-        datetime_obj2 = datetime.datetime(int(date[6:]), int(date[3:5]), int(date[:2]),
-                                          int(dev_hist.last_msg_time[:2]), int(dev_hist.last_msg_time[3:5]),
-                                          int(dev_hist.last_msg_time[6:]))
-        seconds = get_sec_diff(datetime_obj, datetime_obj2)
-
+        seconds = get_sec_diff(datetime_obj, dev_hist.last_msg_time)
         if (seconds <= constants.MAX_TIME_DELAY):
           setattr(bio, sum_field, (attr_value * seconds * 500))
           setattr(bio, time_field, seconds)
@@ -233,8 +253,8 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
           pass # Lack of continuity upon message delivery. Leave fields without updating
       else:
         # We don't have a way to determine how much time the device has been gathering samples since it booted up.
-        # We know 'x' falls within 0<x<=10'30", range, but we don't know it accurately, so we start measuring device's
-        # computing time from the second message onwards to update the average(s).
+        # We know 'x' falls within 0<x<=10'30", range, but we don't know it accurately, so we start measuring
+        # device's computing time from the second message onwards to update the average(s).
         pass
 
 
@@ -247,30 +267,37 @@ async def send_dev_data(contact, patient):
   loc_avail = 0
   dev_conf = await async_my_get_attr(patient, "dev_conf")
   dev_hist_qs = await async_Device_History_filter(dev_conf=dev_conf)
+  dev_hist = None
   exists = await dev_hist_qs.aexists()
-
   if exists:
-    dev_hist = await dev_hist_qs.alatest("date")
-    latitude = dev_hist.last_known_latitude
-    longitude = dev_hist.last_known_longitude
+    try:
+      dev_hist = await dev_hist_qs.alatest("date")
+      latitude = dev_hist.last_known_latitude
+      longitude = dev_hist.last_known_longitude
+    except models.Device_History.DoesNotExist:
+      pass
 
   title_msg = "---DEVICE DATA FROM PATIENT '" + patient.name.upper()
   title_msg += " " + patient.surname.upper() + "'---"
 
-  message = title_msg + "\nLast message sent: "
-  message += dev_hist.date + ", at " + dev_hist.last_msg_time
-  message += "\nLocation: "
+  if (dev_hist != None):
+    message = title_msg + "\nLast message sent: "
+    message += str(dev_hist.last_msg_time) + "\nRelated location: "
 
-  if (latitude != "" and longitude != ""):
-    loc_avail = 1
-    message += "(lat:" + latitude + ", long:" + longitude + ")"
+    if (latitude != "" and longitude != ""):
+      loc_avail = 1
+      message += "(lat:" + latitude + ", long:" + longitude + ")"
+    else:
+      message += "Not available"
   else:
-    message += "Not available\n\n" + title_msg
+    message = title_msg + "\nThere are no records available from '"
+    message +=  patient.name + " " + patient.surname + "' device."
+    message += " Unable to get device location."
 
   await send_message(contact.echat_id, message)
   if loc_avail: # Last location available
+    await asyncio.sleep(2)
     await send_location(contact.echat_id, latitude, longitude)
-    # await send_message(contact.echat_id, title_msg)
 
 
 async def check_stop(**kwargs):
@@ -307,7 +334,6 @@ async def check_stop(**kwargs):
     notifier_event.set()
     return stopped
 
-  from sigfox_messages.bot import send_message, stopped_message, SPAWN_CONFIG
   stopped = 1
   async for pcontact in pcontact_qs:
     while 1:
@@ -328,6 +354,7 @@ async def check_stop(**kwargs):
         await asyncio.sleep(5) # Wait for it to be created on database
 
   if stopped: # All emergencies have been attended, stop alerting
+    from sigfox_messages.bot import SPAWN_CONFIG
     contact.echat_state = SPAWN_CONFIG
     await contact.asave()
     async for pcontact in pcontact_qs:
@@ -337,21 +364,34 @@ async def check_stop(**kwargs):
   return stopped
 
 
-def get_emergency_message(patient, message_type):
+async def get_emergency_message(pcontact_dict):
 
-  # Set default message to "emergency spotted"
-  message = "---AUTOMATED EMERGENCY NOTIFICATION---\n\nHello, we send you this message "
-  message += "because monitor device, from patient '" + patient.name.upper() + " "
-  message += patient.surname.upper() + "', spotted an emergency condition (BPM LIMIT EXCEEDED). "
-  message += "Please issue '/stop' command to let us know that you are aware of the situation.\n\n"
-  message += "---AUTOMATED EMERGENCY NOTIFICATION---"
+  message = "---AUTOMATED EMERGENCY NOTIFICATION---\n\nHello, we send you this message because"
 
-  if (message_type == "alarm_pushed"):
-    message = "---AUTOMATED EMERGENCY NOTIFICATION---\n\nHello, we send you this message because "
-    message += "patient '" + patient.name.upper() + " " + patient.surname.upper() + "', recently "
-    message += "pushed the alarm button on his monitor device (ALARM_MSG). Please issue '/stop' "
-    message += "command to let us know that you are aware of the situation.\n\n---AUTOMATED "
-    message += "EMERGENCY NOTIFICATION---"
+  if (len(pcontact_dict) == 1):
+    pcontact, value = next(iter(pcontact_dict.items()))
+    patient = await async_my_get_attr(pcontact, "patient")
+    message_type = value[1]
+    if (message_type == EMERG_SPOTTED):
+      message += " monitor device, from patient '" + patient.name.upper() + " "
+      message += patient.surname.upper() + "', spotted an emergency condition (BPM LIMIT EXCEEDED)."
+    else: # ALARM_PUSHED message
+      message += " patient '" + patient.name.upper() + " " + patient.surname.upper() + "' recently"
+      message += " pushed the alarm button on his monitor device (ALARM_MSG)."
+  else:
+    message += " several emergencies were detected in some of your patients:\n\n"
+    for pcontact, value in pcontact_dict.items():
+      patient = await async_my_get_attr(pcontact, "patient")
+      message_type = value[1]
+      message += "'" + patient.name.upper() + " " + patient.surname.upper() + "': "
+      if (message_type == EMERG_SPOTTED):
+        message += "emergency condition spotted (BPM LIMIT EXCEEDED)"
+      else: # ALARM_PUSHED message
+        message += "pushed device's alarm button (ALARM_MSG)"
+      message += '\n'
+
+  message += "\nPlease issue '/stop' command to let us know that you are aware of the situation."
+  message += "\n\n---AUTOMATED EMERGENCY NOTIFICATION---"
 
   return message
 
@@ -372,8 +412,10 @@ async def release_notifier(**kwargs):
     contact = await async_my_get_attr(pcontact, "contact")
     patient = await async_my_get_attr(pcontact, "patient")
     await send_dev_data(contact, patient)
+    await asyncio.sleep(1)
 
   # Notify also about "Attended/Not Attended" status of related emergencies for every patient
+  message = ""
   for pcontact in pcontact_list:
     contact = await async_my_get_attr(pcontact, "contact")
     patient = await async_my_get_attr(pcontact, "patient")
@@ -391,11 +433,15 @@ async def release_notifier(**kwargs):
       attended_msg = "Last emergency from patient '" + patient.name.upper()
       attended_msg += " " + patient.surname.upper() + att_value
     else:
-      attended_msg = "Attention request status for patient '"
-      attended_msg += patient.name.upper() + " " + patient.surname.upper()
-      attended_msg += "' is not available"
-    await send_message(contact.echat_id, attended_msg)
+      attended_msg = "Attention request status for patient '" + patient.name.upper()
+      attended_msg += " " + patient.surname.upper() + "' is not available"
 
+    message += attended_msg + '\n' # Join all request status
+
+  message = message[:(len(message)-1)] # Strip last '\n' character
+  await send_message(contact.echat_id, message)
+  # Try to distribute message shipments to Telegram to avoid reaching the limits
+  await asyncio.sleep(2)
   await send_message(contact.echat_id, exit_message)
   notifier.acquire()
   notifier_dict[contact.echat_id] = "Off"
@@ -414,7 +460,8 @@ async def release_notifier(**kwargs):
 
 async def notify_contact(**kwargs):
 
-  from sigfox_messages.bot import send_message, stopped_message
+  from sigfox_messages.bot import STOPPED_MESSAGE
+  from sigfox_messages.bot import send_message, wait_emergency
 
   pcontact = kwargs["pcontact"]
   comm_status = kwargs["comm_status"]
@@ -452,49 +499,49 @@ async def notify_contact(**kwargs):
   origin = 1 # Original while iteration (First call to notify_contact())
   notify = True
   while notify:
-    if (not stop_event.is_set()):
-      stop_event.clear()
     pcontact_dict = {}
     async for pcontact in pcontact_qs:
       patient = await async_my_get_attr(pcontact, "patient")
+      emerg_event = wait_emergency[patient.dni]
       while 1:
+        # Wait until a new record for patient's latest emergency is saved on Database
+        emerg_event.wait()
         emerg_qs = await async_Emergency_Biometrics_filter(patient=patient)
-        exists = await emerg_qs.aexists()
-        if exists:
-          emergency = await emerg_qs.alatest("emerg_date", "emerg_time") # Get the latest emergency
+        try:
+          # Get the latest emergency record
+          emergency = await emerg_qs.alatest("emerg_timestamp")
           pcontact_dict[pcontact] = [emergency, ""]
           break
-        else:
-          print("emergency does not exist", flush=True)
-          await asyncio.sleep(5) # Wait for it to be created on database
+        except models.Emergency_Biometrics.DoesNotExist: # Should never happen
+          print(f"emerg_event was set for patient {patient.name} {patient.surname}",
+                end='', flush=True)
+          print(" but there are no emergencies on DB", flush=True)
+          await asyncio.sleep(5) # Do not continue, retry in 5 seconds
 
-    async for pcontact in pcontact_qs:
-      patient = await async_my_get_attr(pcontact, "patient")
+      # Get saved emergency, set default message
       emerg = pcontact_dict[pcontact][0]
-      pcontact_dict[pcontact][1] = get_emergency_message(patient, "emergency_spotted") # Set default message
+      pcontact_dict[pcontact][1] = EMERG_SPOTTED
       while 1:
         epayload_qs = await async_Emergency_Payload_filter(emergency=emerg)
         exists = await epayload_qs.aexists()
         if exists:
-          # There's probably just one payload on DB for this new emergency 
-          # at this moment. Anyway, loop through the QuerySet
           async for epayload in epayload_qs:
             if (epayload.ereason_payload == "Yes"):
               if (epayload.msg_type == "ALARM_LIMITS_MSG" or
                   epayload.msg_type == "ALARM_MSG"):
-                pcontact_dict[pcontact][1] = get_emergency_message(patient, "alarm_pushed")
+                pcontact_dict[pcontact][1] = ALARM_PUSHED
               else:
-                pcontact_dict[pcontact][1] = get_emergency_message(patient, "emergency_spotted")
+                pcontact_dict[pcontact][1] = EMERG_SPOTTED
               break
             elif (epayload.msg_type == "ALARM_LIMITS_MSG" or
                   epayload.msg_type == "ALARM_MSG"):
-              pcontact_dict[pcontact][1] = get_emergency_message(patient, "alarm_pushed")
+              pcontact_dict[pcontact][1] = ALARM_PUSHED
           break
         else:
           print("Waiting for payload to be saved on DB", flush=True)
           asyncio.sleep(5) # Wait for it to be created on database
 
-    async for pcontact in pcontact_qs:
+      # Track all emergencies since notifier started
       origin_pcontact_dict[pcontact] = pcontact_dict[pcontact]
       if (pcontact not in pcontact_list):
         pcontact_list.append(pcontact)
@@ -502,25 +549,26 @@ async def notify_contact(**kwargs):
     # Send 4 initial notifications
     if origin:
       origin = 0
+      message = await get_emergency_message(pcontact_dict)
       for e in range(1, 5):
-        await send_message(contact.echat_id, pcontact_dict[pcontact][1])
-        stop_set = stop_event.wait(timeout=3)
+        await send_message(contact.echat_id, message)
+        stop_set = stop_event.wait(timeout=5)
         if stop_set:
           break
 
       if ((stop_set == False) and (contact.sms_alerts == "Yes")):
-        await asyncio.sleep(10)
-        # Send one SMS alert
+        # await asyncio.sleep(10)
+        # send_sms_alert(contact, SMS_ALERT_MESSAGE)
 
     # Wait 20 seconds to send next notification
-    stop_event.wait(timeout=20)
+    stop_event.wait(timeout=25)
     stop = await check_stop(pcontact_qs=pcontact_qs,
                             pcontact_dict=pcontact_dict,
                             comm_status=comm_status,
                             notifier_event=notifier_event)
     if not stop:
-      async for pcontact in pcontact_qs:
-        await send_message(contact.echat_id, pcontact_dict[pcontact][1])
+      message = await get_emergency_message(pcontact_dict)
+      await send_message(contact.echat_id, message)
 
     # Clear event to tell all applicants for this chat to remain active unti notifier releases the locks
     notifier_event.clear()
@@ -530,7 +578,7 @@ async def notify_contact(**kwargs):
     notify = await pcontact_qs.aexists()
     if (notify == False):
       # Stop notifying ('/stop' issued or all emergencies were marked as 'Attended')
-      await release_notifier(exit_message=stopped_message,
+      await release_notifier(exit_message=STOPPED_MESSAGE,
                              pcontact_list=pcontact_list,
                              pcontact_dict=origin_pcontact_dict,
                              applicant_event=applicant_event,
@@ -540,10 +588,11 @@ async def notify_contact(**kwargs):
     elif stop: # notify == True
       message = "**New emergencies have been detected for the following patients**:\n\n"
       async for pcontact in pcontact_qs:
+        patient = await async_my_get_attr(pcontact, "patient")
         message += "Patient '" + patient.name.upper() + " "
         message += patient.surname.upper() + "'\n"
       message += "\n**New emergencies detected**\n\n"
-      await release_notifier(exit_message=message+stopped_message,
+      await release_notifier(exit_message=message+STOPPED_MESSAGE,
                              pcontact_list=pcontact_list,
                              pcontact_dict=origin_pcontact_dict,
                              applicant_event=applicant_event,
@@ -564,7 +613,6 @@ def notifier(patient):
   from sigfox_messages.bot import notifiers_lock, notifier_dict_lock, notifier_dict
 
   busy_chats = {}
-
   async def notify():
 
     tasks_created = 0

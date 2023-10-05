@@ -35,7 +35,7 @@ Lastly, we'll connect a couple of LEDS to our Arduino Board:
 
 There's a lot of documentation on how connecting these sensors to Arduino Boards provided, for instance, on the links of the repos above.
 
-Nonetheless, we'll put a simple schema here on how conenting the pins, given that this board works with 3.3V
+Nonetheless, we'll put a simple schema here on how connecting the pins, given that this board works with 3.3V
 
 
 **PulseSensor**

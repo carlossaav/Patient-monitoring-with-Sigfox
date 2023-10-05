@@ -55,8 +55,7 @@
         <p>Check out patient's historical biometrics on emergencies:</p>
         <ul>
         {% for ebio in emergency_list %}
-          <li><a href="{% url 'emergency_detail' ebio.id %}">{{ ebio.emerg_date }}, {{ ebio.emerg_time }}
-          </a></li>
+          <li><a href="{% url 'emergency_detail' ebio.id %}">{{ ebio }}</a></li>
         {% endfor %}
         </ul>
       {% else %}
@@ -67,7 +66,7 @@
         <p>Check out patient's biometric history:</p>
         <ul>
         {% for bio in bio_list %}
-          <li><a href="{% url 'biometrics_detail' bio.id %}">{{bio.date}}</a></li>
+          <li><a href="{% url 'biometrics_detail' bio.id %}">{{ bio.date }}</a></li>
         {% endfor %}
         </ul>
       {% else %}
@@ -83,8 +82,8 @@
           </strong></p>
           <ul>
           {% for att_req in auto_att_req %}
-            <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.request_date }}, 
-            {{ att_req.request_time }}</a></li>
+            <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.request_timestamp }}
+            </a></li>
           {% endfor %}
           </ul>
         {% endif %}
@@ -93,8 +92,8 @@
           <p>The following attention requests were <strong>manually registered</strong>:</p>
           <ul>
           {% for att_req in manual_att_req %}
-            <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.request_date }}, 
-            {{ att_req.request_time }}</a></li>
+            <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.request_timestamp }}
+            </a></li>
           {% endfor %}
           </ul>
         {% endif %}
