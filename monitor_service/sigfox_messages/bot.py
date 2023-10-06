@@ -1,18 +1,20 @@
 from sigfox_messages import utils, models
 from telebot.async_telebot import AsyncTeleBot
 from telebot import types
-import asyncio
 from multiprocessing import Process, Manager
-import sys, os
+import os, sys, asyncio, vonage
 
+# Get Telegram Bot token
 try:
   TELEBOT_TOKEN_ID = os.environ["TELEBOT_TOKEN_ID"]
 except KeyError:
-  print("There was an error while retrieving BOT'S TOKEN ID. EXITING.")
+  print("There was an error while retrieving Telegram Bot Token. EXITING.")
   sys.exit()
 
+# Create Telegram Bot object
 bot = AsyncTeleBot(TELEBOT_TOKEN_ID)
 
+vonage_client = None
 operations = {}
 options = []
 wait_emergency = {}
@@ -529,8 +531,8 @@ async def config_number(message):
   # Save contact's phone number
   contact.echat_state = WAIT_NAME_INPUT
   contact.phone_number = str(message.contact.phone_number)
-  if (contact.phone_number[0] != '+'):
-    contact.phone_number = '+' + contact.phone_number
+  if (contact.phone_number[0] == '+'):
+    contact.phone_number = contact.phone_number[1:]
   await contact.asave()
 
   wait_name_dict[contact.echat_id] = ("start", None)
@@ -690,10 +692,25 @@ def launch_bot():
   asyncio.run(bot.polling())
   # print("Bot polling finished")
 
+
 def main():
+
+  # Get VONAGE credentials
+  try:
+    VONAGE_API_KEY = os.environ['VONAGE_API_KEY']
+    VONAGE_API_SECRET = os.environ['VONAGE_API_SECRET']
+  except KeyError:
+    print("There was an error while retrieving VONAGE credentials. EXITING.")
+    sys.exit()
+
+  # Create VONAGE client object
+  global vonage_client
+  vonage_client = vonage.Client(key=VONAGE_API_KEY, secret=VONAGE_API_SECRET)
 
   # One event per patient to wait for new emergencies to be saved on Database
   for patient in models.Patient.objects.all():
+    # wait_emergency (a mutable object) does not need to be declared as 'global' 
+    # for it to be regarded as the global variable 'wait_emergency'
     wait_emergency[patient.dni] = manager.Event()
 
   # Populate shared dicts among bot and chat notifiers

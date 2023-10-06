@@ -2,10 +2,15 @@
 # Estimation of number of samples for each interval
 REGULAR_SHIP_UPDATE_SAMPLES = 315000
 
-MAX_TIME_DELAY = 1360 # 22'40" (higher recovery sequence delay plus failed shipment (1 min) plus delivery delay (40 seconds) from Sigfox Backend)
+# 22'40" (higher recovery sequence delay plus failed shipment (1 min) plus 
+# delivery delay (40 seconds) from Sigfox Backend)
+MAX_TIME_DELAY = 1360
 
-NEW_EMERG_DELAY = 2700 # mimimum time to regard a new emergency message as another emergency (45 min)
-# NEW_EMERG_DELAY = 300
+# Mimimum time to regard a new emergency message as another emergency (in seconds)
+NEW_EMERG_DELAY = 2700 # 45 minutes
+
+# Mimimum time to resend a SMS notification (in minutes)
+SMS_DELAY = 20
 
 # Msg types 
 ALARM_MSG = 0

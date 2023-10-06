@@ -1,35 +1,30 @@
 from sigfox_messages import models, constants
 from asgiref.sync import sync_to_async, async_to_sync
-import asyncio, struct
-from twilio.rest import Client
-import os, sys, datetime
+import asyncio, struct, datetime
 
 ALARM_PUSHED = "alarm_pushed"
 EMERG_SPOTTED = "emergency_spotted"
 
-SMS_ALERT_MESSAGE = "\n--MONITORING SYSTEM ALERT--\n\nHello, we notify "
-SMS_ALERT_MESSAGE += "you for an emergency that has recently arisen in some of the"
+SMS_ALERT_MESSAGE = "--MONITORING SYSTEM ALERT--\n\nHello, we notify "
+SMS_ALERT_MESSAGE += "you for a recently arisen emergency in some of the "
 SMS_ALERT_MESSAGE += "patients you're currently monitoring. Check out your "
-SMS_ALERT_MESSAGE += "Telegram's chat for more info.\n\n--MONITORING SYSTEM ALERT--"
+SMS_ALERT_MESSAGE += "Telegram's chat for more info.\n\n--MONITORING SYSTEM ALERT--\n\n"
 
-# Get Twilio credentials
-try:
-  TWILIO_ACCOUNT_SID = os.environ['TWILIO_ACCOUNT_SID']
-  TWILIO_AUTH_TOKEN = os.environ['TWILIO_AUTH_TOKEN']
-except KeyError:
-  print("There was an error while retrieving TWILIO'S credentials. EXITING.")
-  sys.exit()
-
-# Create twilio client object
-client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 def send_sms_alert(contact, message):
 
-  message = client.messages.create(from_=+12565784086,
-                                   to=contact.phone_number,
-                                   body=message)
+  from sigfox_messages.bot import vonage_client
+
+  if (vonage_client == None):
+    print("Vonage client object equals to None. Skipping SMS shipping")
+    return
+
+  print(f"Account balance: {vonage_client.account.get_balance()}")
   print(f"Sending SMS to number {contact.phone_number}")
-  print(f"(SMS) message.status = {message.status}")
+  vonage_client.sms.send_message({"from": "VONAGE API",
+                                  "to": contact.phone_number,
+                                  "text": message})
+  print(f"Message sent. Account balance now: {vonage_client.account.get_balance()}")
 
 
 def my_get_attr(obj, attr):
@@ -282,7 +277,7 @@ async def send_dev_data(contact, patient):
 
   if (dev_hist != None):
     message = title_msg + "\nLast message sent: "
-    message += str(dev_hist.last_msg_time) + "\nRelated location: "
+    message += str(dev_hist.last_msg_time) + "\nLast known location: "
 
     if (latitude != "" and longitude != ""):
       loc_avail = 1
@@ -412,7 +407,7 @@ async def release_notifier(**kwargs):
     contact = await async_my_get_attr(pcontact, "contact")
     patient = await async_my_get_attr(pcontact, "patient")
     await send_dev_data(contact, patient)
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
   # Notify also about "Attended/Not Attended" status of related emergencies for every patient
   message = ""
@@ -460,8 +455,7 @@ async def release_notifier(**kwargs):
 
 async def notify_contact(**kwargs):
 
-  from sigfox_messages.bot import STOPPED_MESSAGE
-  from sigfox_messages.bot import send_message, wait_emergency
+  from sigfox_messages.bot import send_message, wait_emergency, STOPPED_MESSAGE
 
   pcontact = kwargs["pcontact"]
   comm_status = kwargs["comm_status"]
@@ -557,8 +551,9 @@ async def notify_contact(**kwargs):
           break
 
       if ((stop_set == False) and (contact.sms_alerts == "Yes")):
-        # await asyncio.sleep(10)
-        # send_sms_alert(contact, SMS_ALERT_MESSAGE)
+        await asyncio.sleep(10)
+        send_sms_alert(contact, SMS_ALERT_MESSAGE)
+        sms_timestamp = datetime.datetime.now()
 
     # Wait 20 seconds to send next notification
     stop_event.wait(timeout=25)
@@ -569,6 +564,13 @@ async def notify_contact(**kwargs):
     if not stop:
       message = await get_emergency_message(pcontact_dict)
       await send_message(contact.echat_id, message)
+      if (contact.sms_alerts == "Yes"):
+        sms_delay = (get_sec_diff(datetime.datetime.now(), sms_timestamp)) // 60 # Convert it to minutes
+        if (sms_delay >= constants.SMS_DELAY):
+          await asyncio.sleep(10)
+          send_sms_alert(contact, SMS_ALERT_MESSAGE)
+          sms_timestamp = datetime.datetime.now()
+          await asyncio.sleep(10)
 
     # Clear event to tell all applicants for this chat to remain active unti notifier releases the locks
     notifier_event.clear()

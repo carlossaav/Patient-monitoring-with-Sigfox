@@ -6,7 +6,6 @@ from http import HTTPStatus
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from sigfox_messages import utils, models, constants
-from sigfox_messages.bot import manager
 from multiprocessing import Process
 import asyncio, datetime, json
 from django.utils import timezone
@@ -548,7 +547,7 @@ def index(request):
                   patient.save()
                   context["patient_registered"] = 1
                   
-                  from sigfox_messages.bot import wait_emergency
+                  from sigfox_messages.bot import wait_emergency, manager
                   wait_emergency[patient.dni] = manager.Event()
               else:
                 err = 1
