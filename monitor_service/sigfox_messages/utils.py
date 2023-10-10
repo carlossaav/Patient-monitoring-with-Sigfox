@@ -1,6 +1,10 @@
 from sigfox_messages import models, constants
 from asgiref.sync import sync_to_async, async_to_sync
-import asyncio, struct, datetime
+from datetime import datetime, timedelta
+from functools import partial
+from random import randint
+import asyncio, struct
+
 
 ALARM_PUSHED = "alarm_pushed"
 EMERG_SPOTTED = "emergency_spotted"
@@ -10,6 +14,10 @@ SMS_ALERT_MESSAGE += "you for a recently arisen emergency in some of the "
 SMS_ALERT_MESSAGE += "patients you're currently monitoring. Check out your "
 SMS_ALERT_MESSAGE += "Telegram's chat for more info.\n\n--MONITORING SYSTEM ALERT--\n\n"
 
+STOPPED_MESSAGE = "---ALERT SYSTEM STOPPED---\n\n"
+STOPPED_MESSAGE += "If you want to get the latest patient biometrics, visit "
+STOPPED_MESSAGE += "http://ec2-18-216-53-173.us-east-2.compute.amazonaws.com:8000/sigfox_messages\n\n"
+STOPPED_MESSAGE += "---ALERT SYSTEM STOPPED---"
 
 def send_sms_alert(contact, message):
 
@@ -25,6 +33,84 @@ def send_sms_alert(contact, message):
                                   "to": contact.phone_number,
                                   "text": message})
   print(f"Message sent. Account balance now: {vonage_client.account.get_balance()}")
+
+
+async def send_message(async_lock, echat_id, text):
+
+  from sigfox_messages.bot import bot, last_message_lock, last_message
+
+  # Assure there's at least constants.MESSAGE_DELAY seconds difference
+  # between calls to bot.send_message()
+
+  msg_sent = 0
+  # **Only one task from the notifier process access 'last_message_lock' at a time**
+  # Avoid locking 'last_message_lock' from several tasks of the same process.
+  # Hang here until 'async_lock' is released by another task to try to acquire
+  # 'last_message_lock'
+  await async_lock.acquire()
+  last_message_lock.acquire()
+  diff = datetime.now() - last_message.value
+  if (diff.seconds >= constants.MESSAGE_DELAY):
+    print(f"sending message to '{echat_id}' at: {datetime.now()}", flush=True)
+    await bot.send_message(echat_id, text)
+    last_message.value = datetime.now()
+    print(f"message sent ({echat_id}) at {last_message.value}", flush=True)
+    msg_sent = 1
+    print()
+  else:
+    diff = (last_message.value + timedelta(seconds=constants.MESSAGE_DELAY)) - datetime.now()
+
+  last_message_lock.release()
+  async_lock.release()
+
+  return msg_sent, diff
+
+
+
+async def send_location(async_lock, echat_id, latitude, longitude):
+
+  from sigfox_messages.bot import bot, last_location_lock, last_location
+
+  # Use the same delay than text messages
+  loc_sent = 0
+  await async_lock.acquire()
+  last_location_lock.acquire()
+  diff = datetime.now() - last_location.value
+  if (diff.seconds >= constants.MESSAGE_DELAY):
+    print(f"sending location to '{echat_id}' at: {datetime.now()}", flush=True)
+    await bot.send_location(echat_id, latitude, longitude)
+    last_location.value = datetime.now()
+    print(f"location sent ({echat_id}) at: {last_location.value}", flush=True)
+    loc_sent = 1
+    print()
+  else:
+    diff = (last_location.value + timedelta(seconds=constants.MESSAGE_DELAY)) - datetime.now()
+
+  last_location_lock.release()
+  async_lock.release()
+
+  return loc_sent, diff
+
+
+async def send(async_lock, echat_id, **kwargs):
+
+  if ("message" in kwargs):
+    send_func = send_message
+    args = (kwargs["message"], )
+  elif (("latitude" in kwargs) and ("longitude" in kwargs)):
+    send_func = send_location
+    args = (kwargs["latitude"], kwargs["longitude"])
+  else:
+    print("Wrong parameters passed to send function", flush=True)
+    return
+
+  msg_sent = 0
+  while (not msg_sent):
+    msg_sent, diff = await send_func(async_lock, echat_id, *args)
+    if (not msg_sent):
+      sec_diff = diff.seconds + (diff.microseconds)/10**6
+      print(f"sleeping {sec_diff} seconds.. ({echat_id})", flush=True)
+      await asyncio.sleep(sec_diff)
 
 
 def my_get_attr(obj, attr):
@@ -79,7 +165,7 @@ def get_attr_name(range_id):
 # Substract one day to the given date
 def delta(date):
 
-  d = datetime.timedelta(1)
+  d = timedelta(1)
   date = date - d
 
   return date
@@ -253,10 +339,10 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
         pass
 
 
-async def send_dev_data(contact, patient):
+async def send_dev_data(contact, patient, async_lock=None, chatbot=False):
 
-  from sigfox_messages.bot import send_message, send_location
-  
+  from sigfox_messages.bot import bot
+
   latitude = ""
   longitude = ""
   loc_avail = 0
@@ -289,10 +375,14 @@ async def send_dev_data(contact, patient):
     message +=  patient.name + " " + patient.surname + "' device."
     message += " Unable to get device location."
 
-  await send_message(contact.echat_id, message)
-  if loc_avail: # Last location available
-    await asyncio.sleep(2)
-    await send_location(contact.echat_id, latitude, longitude)
+  if chatbot: # Regular '/locate' command interaction
+    await bot.send_message(contact.echat_id, message)
+    if loc_avail:
+      await bot.send_location(contact.echat_id, latitude, longitude)
+  else: # Ongoing notifier process trying to send data
+    await send(async_lock, contact.echat_id, message=message)
+    if loc_avail: # Last location available
+      await send(async_lock, contact.echat_id, latitude=latitude, longitude=longitude)
 
 
 async def check_stop(**kwargs):
@@ -391,9 +481,18 @@ async def get_emergency_message(pcontact_dict):
   return message
 
 
-async def release_notifier(**kwargs):
+async def wait_event(event, timeout=None):
 
-  from sigfox_messages.bot import send_message
+  loop = asyncio.get_running_loop()
+  if (timeout != None):
+    was_set = await loop.run_in_executor(None, partial(event.wait, timeout=timeout))
+  else:
+    was_set = await loop.run_in_executor(None, event.wait)
+    
+  return was_set
+
+
+async def release_notifier(**kwargs):
 
   exit_message = kwargs["exit_message"]
   pcontact_list = kwargs["pcontact_list"]
@@ -402,12 +501,12 @@ async def release_notifier(**kwargs):
   comm_status = kwargs["comm_status"]
   notifier = kwargs["notifier"]
   notifier_dict = kwargs["notifier_dict"]
+  async_lock = kwargs["async_lock"]
 
   for pcontact in pcontact_list:
     contact = await async_my_get_attr(pcontact, "contact")
     patient = await async_my_get_attr(pcontact, "patient")
-    await send_dev_data(contact, patient)
-    await asyncio.sleep(2)
+    await send_dev_data(contact, patient, async_lock=async_lock)
 
   # Notify also about "Attended/Not Attended" status of related emergencies for every patient
   message = ""
@@ -433,18 +532,16 @@ async def release_notifier(**kwargs):
 
     message += attended_msg + '\n' # Join all request status
 
-  message = message[:(len(message)-1)] # Strip last '\n' character
-  await send_message(contact.echat_id, message)
-  # Try to distribute message shipments to Telegram to avoid reaching the limits
-  await asyncio.sleep(2)
-  await send_message(contact.echat_id, exit_message)
+  # message = message[:(len(message)-1)] # Strip last '\n' character
+  await send(async_lock, contact.echat_id, message=message+'\n'+exit_message)
   notifier.acquire()
   notifier_dict[contact.echat_id] = "Off"
   notifier.release()
   comm_status.release()
   print("Waiting for applicant_event to be set to leave notification loop ", end='', flush=True)
   print(f"for chat {contact.echat_id}", flush=True)
-  was_set = applicant_event.wait(timeout=30)
+  # was_set = applicant_event.wait(timeout=30)
+  was_set = await wait_event(applicant_event, timeout=constants.NOTIFIER_WAIT)
   if was_set:
     print(f"applicant_event was set for chat = {contact.echat_id} ", flush=True)
   else:
@@ -452,10 +549,9 @@ async def release_notifier(**kwargs):
   # applicant_event.clear() # Placed here this call generates errors, avoid it
 
 
-
 async def notify_contact(**kwargs):
 
-  from sigfox_messages.bot import send_message, wait_emergency, STOPPED_MESSAGE
+  from sigfox_messages.bot import wait_emergency
 
   pcontact = kwargs["pcontact"]
   comm_status = kwargs["comm_status"]
@@ -464,19 +560,22 @@ async def notify_contact(**kwargs):
   notifier_event = kwargs["notifier_event"]
   applicant_event = kwargs["applicant_event"]
   stop_event = kwargs["stop_event"]
+  async_lock = kwargs["async_lock"]
 
   contact = await async_my_get_attr(pcontact, "contact")
   patient = await async_my_get_attr(pcontact, "patient")
 
-  # If we are within this function, it means we've already acquired 'notifier lock' related to this chat
+  # If we are within this function, it means we've already acquired 'notifier lock'
+  # related to this chat
   notifier_dict[contact.echat_id] = "Notifying"
   notifier.release()
   notifier_event.set()
 
   # Notify a possible notifier for this chat that we've already used/released the locks,
-  # so it's enabled to exit. We do this in order to avoid likely exceptions (i.e. BrokenPipeError)
-  # due to processes having used the same lock but ended their execution. Keep them alive
-  # until we release the lock by setting up the 'applicant' event when we are done using it.
+  # so it's enabled to exit. We do this in order to avoid likely exceptions
+  # (i.e. BrokenPipeError) due to processes having used the same lock but ended their execution.
+  # Keep them alive until we release the lock by setting up the 'applicant' event when we are done
+  # using it.
   applicant_event.set() # Set it up for ongoing notifier about to exit
   stop_event.clear()
 
@@ -499,7 +598,7 @@ async def notify_contact(**kwargs):
       emerg_event = wait_emergency[patient.dni]
       while 1:
         # Wait until a new record for patient's latest emergency is saved on Database
-        emerg_event.wait()
+        await wait_event(emerg_event)
         emerg_qs = await async_Emergency_Biometrics_filter(patient=patient)
         try:
           # Get the latest emergency record
@@ -545,34 +644,36 @@ async def notify_contact(**kwargs):
       origin = 0
       message = await get_emergency_message(pcontact_dict)
       for e in range(1, 5):
-        await send_message(contact.echat_id, message)
-        stop_set = stop_event.wait(timeout=5)
+        await send(async_lock, contact.echat_id, message=message)
+        rand_int = randint(constants.MESSAGE_DELAY, constants.MESSAGE_DELAY+3)
+        stop_set = await wait_event(stop_event, timeout=rand_int)
         if stop_set:
           break
 
       if ((stop_set == False) and (contact.sms_alerts == "Yes")):
         await asyncio.sleep(10)
         send_sms_alert(contact, SMS_ALERT_MESSAGE)
-        sms_timestamp = datetime.datetime.now()
+        sms_timestamp = datetime.now()
 
-    # Wait 20 seconds to send next notification
-    stop_event.wait(timeout=25)
+    # Wait 'constants.NOTIFICATION_PERIOD' seconds to send next notification
+    await wait_event(stop_event, timeout=constants.NOTIFICATION_PERIOD)
     stop = await check_stop(pcontact_qs=pcontact_qs,
                             pcontact_dict=pcontact_dict,
                             comm_status=comm_status,
                             notifier_event=notifier_event)
     if not stop:
       message = await get_emergency_message(pcontact_dict)
-      await send_message(contact.echat_id, message)
+      await send(async_lock, contact.echat_id, message=message)
       if (contact.sms_alerts == "Yes"):
-        sms_delay = (get_sec_diff(datetime.datetime.now(), sms_timestamp)) // 60 # Convert it to minutes
+        sms_delay = (get_sec_diff(datetime.now(), sms_timestamp)) // 60 # Convert it to minutes
         if (sms_delay >= constants.SMS_DELAY):
           await asyncio.sleep(10)
           send_sms_alert(contact, SMS_ALERT_MESSAGE)
-          sms_timestamp = datetime.datetime.now()
+          sms_timestamp = datetime.now()
           await asyncio.sleep(10)
 
-    # Clear event to tell all applicants for this chat to remain active unti notifier releases the locks
+    # Clear event to tell all applicants for this chat to remain active unti notifier releases
+    # the locks
     notifier_event.clear()
     # Acquire comm_status lock to check about any pcontact.comm_status == 'pending' presence
     comm_status.acquire()
@@ -586,7 +687,8 @@ async def notify_contact(**kwargs):
                              applicant_event=applicant_event,
                              comm_status=comm_status,
                              notifier=notifier,
-                             notifier_dict=notifier_dict)
+                             notifier_dict=notifier_dict,
+                             async_lock=async_lock)
     elif stop: # notify == True
       message = "**New emergencies have been detected for the following patients**:\n\n"
       async for pcontact in pcontact_qs:
@@ -600,7 +702,8 @@ async def notify_contact(**kwargs):
                              applicant_event=applicant_event,
                              comm_status=comm_status,
                              notifier=notifier,
-                             notifier_dict=notifier_dict)
+                             notifier_dict=notifier_dict,
+                             async_lock=async_lock)
       return # Leave notification loop
     else: # notify == True
       # One or more pcontact.comm_status are still in "Pending" state and user haven't noticed yet
@@ -610,7 +713,7 @@ async def notify_contact(**kwargs):
 
 def notifier(patient):
 
-  from sigfox_messages.bot import contact_lock, event_dict_lock, event_dict
+  from sigfox_messages.bot import contacts_lock, event_dict_lock, event_dict
   from sigfox_messages.bot import comm_statuses_lock, comm_status_dict_lock
   from sigfox_messages.bot import notifiers_lock, notifier_dict_lock, notifier_dict
 
@@ -618,7 +721,8 @@ def notifier(patient):
   async def notify():
 
     tasks_created = 0
-    contact_lock.acquire()
+    async_lock = asyncio.Lock() # Shared among all tasks of the process
+    contacts_lock.acquire()
     pcontact_qs = await async_Patient_Contact_filter(patient=patient)
     async for pcontact in pcontact_qs:
       contact = await async_my_get_attr(pcontact, "contact")
@@ -654,10 +758,11 @@ def notifier(patient):
                                          comm_status=comm_status,
                                          notifier=notifier,
                                          notifier_dict=notifier_dict,
-                                         stop_event=stop_event))
+                                         stop_event=stop_event,
+                                         async_lock=async_lock))
       tasks_created = 1
 
-    contact_lock.release()
+    contacts_lock.release()
     if tasks_created:
       tasks = asyncio.all_tasks()
       tasks.remove(asyncio.current_task())

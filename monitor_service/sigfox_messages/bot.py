@@ -1,8 +1,9 @@
-from sigfox_messages import utils, models
+from sigfox_messages import utils, models, constants
 from telebot.async_telebot import AsyncTeleBot
 from telebot import types
 from multiprocessing import Process, Manager
-import os, sys, asyncio, vonage
+import os, sys, asyncio, vonage, ctypes
+from datetime import datetime, timedelta
 
 # Get Telegram Bot token
 try:
@@ -19,10 +20,10 @@ operations = {}
 options = []
 wait_emergency = {}
 
-# Share these dictionaries among Telgram's Bot polling process and notifier processes
 manager = Manager()
 
-contact_lock = manager.Lock()
+# Share these dictionaries among Telegram's Bot polling process and notifier processes
+contacts_lock = manager.Lock()
 event_dict_lock = manager.Lock()
 event_dict = manager.dict() # Two manager.Events() for every chat
 
@@ -33,23 +34,16 @@ notifiers_lock = manager.Lock() # Lock to access "notifier_dict_lock"
 notifier_dict_lock = manager.dict() # Dict that associates one "notifier lock" to every chat
 notifier_dict = manager.dict() # Dict that stores the state of every chat ("Notifying/"Off")
 
+last_message_lock = manager.Lock()
+last_message = manager.Value(ctypes.py_object, datetime.now())
 
-async def send_message(echat_id, text):
-  await bot.send_message(echat_id, text)
-
-async def send_location(echat_id, latitude, longitude):
-  await bot.send_location(echat_id, latitude, longitude)
-
+last_location_lock = manager.Lock()
+last_location = manager.Value(ctypes.py_object, datetime.now())
 
 goodbye_msg = "Thanks for using Monitor Service."
 help_message = "Please issue '/help' command to get interactive help"
 stop_broadcast_msg = "In order to interact with me, you must first stop alert broadcasting to this phone "
 stop_broadcast_msg += "for the current emergencies to be marked as 'Received', so please issue '/stop' command"
-
-STOPPED_MESSAGE = "---ALERT SYSTEM STOPPED---\n\n"
-STOPPED_MESSAGE += "If you want to get the latest patient biometrics, visit "
-STOPPED_MESSAGE += "http://ec2-18-216-53-173.us-east-2.compute.amazonaws.com:8000/sigfox_messages\n\n"
-STOPPED_MESSAGE += "---ALERT SYSTEM STOPPED---"
 
 
 help_list = """
@@ -148,7 +142,6 @@ async def init_dialogue(message):
                                                    echat_state=SPAWN_CONFIG,
                                                    phone_number="",
                                                    sms_alerts="No")
-    print("Updating dict locks", flush=True)
     event_dict_lock.acquire()
     event_dict[contact.echat_id] = (manager.Event(), manager.Event(), manager.Event())
     event_dict_lock.release()
@@ -244,9 +237,6 @@ async def add_patient(message):
   await bot.reply_to(message, reply)
 
 
-async def locate(patient):
-  pass
-
 async def perform_location(contact, message):
 
   dloc = wait_loc_patient[contact.echat_id]
@@ -263,7 +253,7 @@ async def perform_location(contact, message):
   del(wait_loc_patient[contact.echat_id])
 
   if pat_found:
-    await utils.send_dev_data(contact, patient)
+    await utils.send_dev_data(contact, patient, chatbot=True)
     await contact.asave()
     reply = None
   else:
@@ -479,7 +469,7 @@ async def confirm_operation(contact, text, chat_state):
       contact.echat_state = SPAWN_CONFIG
       reply = "Alright, SMS alert system has also been enabled on this phone. " + goodbye_msg
     elif (chat_state == WAIT_DEL_CONF):
-      contact_lock.acquire()
+      contacts_lock.acquire()
       echat_id = contact.echat_id
       for pcontact in wait_del_dict[echat_id]:
         await pcontact.adelete() # CASCADE constrain will erase related contact in Patient_Contact table???
@@ -498,7 +488,7 @@ async def confirm_operation(contact, text, chat_state):
       event_dict_lock.acquire()
       del(event_dict[echat_id])
       event_dict_lock.release()
-      contact_lock.release()
+      contacts_lock.release()
       contact = None
       reply = "Phone number deleted from Database. " + goodbye_msg + " Kind Regards"
   elif (text in l[5:]): # User "backed out"
@@ -714,13 +704,13 @@ def main():
     wait_emergency[patient.dni] = manager.Event()
 
   # Populate shared dicts among bot and chat notifiers
-  contact_lock.acquire()
+  contacts_lock.acquire()
   for contact in models.Contact.objects.all():
     event_dict[contact.echat_id] = (manager.Event(), manager.Event(), manager.Event())
     comm_status_dict_lock[contact.echat_id] = manager.Lock()
     notifier_dict_lock[contact.echat_id] = manager.Lock()
     notifier_dict[contact.echat_id] = "Off"
-  contact_lock.release()
+  contacts_lock.release()
 
   restart_chats() # Restart chat states
   p = Process(target=launch_bot)

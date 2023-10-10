@@ -12,6 +12,15 @@ NEW_EMERG_DELAY = 2700 # 45 minutes
 # Mimimum time to resend a SMS notification (in minutes)
 SMS_DELAY = 20
 
+# Introduce seconds delay between calls to send_message()
+MESSAGE_DELAY = 2
+
+# Specify the wait in seconds for a notifier process to leave loop
+NOTIFIER_WAIT = 30
+
+# Specify the notification period in seconds for chats
+NOTIFICATION_PERIOD = 25
+
 # Msg types 
 ALARM_MSG = 0
 LIMITS_MSG = 1
