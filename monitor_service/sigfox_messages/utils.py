@@ -5,7 +5,6 @@ from functools import partial
 from random import randint
 import asyncio, struct
 
-
 ALARM_PUSHED = "alarm_pushed"
 EMERG_SPOTTED = "emergency_spotted"
 
@@ -16,10 +15,10 @@ SMS_ALERT_MESSAGE += "Telegram's chat for more info.\n\n--MONITORING SYSTEM ALER
 
 STOPPED_MESSAGE = "---ALERT SYSTEM STOPPED---\n\n"
 STOPPED_MESSAGE += "If you want to get the latest patient biometrics, visit "
-STOPPED_MESSAGE += "http://ec2-18-216-53-173.us-east-2.compute.amazonaws.com:8000/sigfox_messages\n\n"
-STOPPED_MESSAGE += "---ALERT SYSTEM STOPPED---"
+STOPPED_MESSAGE += constants.SERVICE_URL + "\n\n---ALERT SYSTEM STOPPED---"
 
-def send_sms_alert(contact, message):
+
+async def send_sms_alert(contact, message):
 
   from sigfox_messages.bot import vonage_client
 
@@ -27,19 +26,20 @@ def send_sms_alert(contact, message):
     print("Vonage client object equals to None. Skipping SMS shipping")
     return
 
-  print(f"Account balance: {vonage_client.account.get_balance()}")
-  print(f"Sending SMS to number {contact.phone_number}")
-  vonage_client.sms.send_message({"from": "VONAGE API",
-                                  "to": contact.phone_number,
-                                  "text": message})
-  print(f"Message sent. Account balance now: {vonage_client.account.get_balance()}")
+  print(f"Sending SMS to number {contact.phone_number} at: {datetime.now()}", flush=True)
+  loop = asyncio.get_running_loop()
+  d = {"from": "VONAGE API", "to": contact.phone_number, "text": message}
+  await loop.run_in_executor(None, partial(vonage_client.sms.send_message, d))
+  print(f"Message sent to number {contact.phone_number} at: {datetime.now()}", flush=True)
+  print(f"Account balance: {vonage_client.account.get_balance()}", flush=True)
+  print()
 
 
 async def send_message(async_lock, echat_id, text):
 
   from sigfox_messages.bot import bot, last_message_lock, last_message
 
-  # Assure there's at least constants.MESSAGE_DELAY seconds difference
+  # Assure there's at least 'constants.MESSAGE_DELAY' seconds difference
   # between calls to bot.send_message()
 
   msg_sent = 0
@@ -488,7 +488,7 @@ async def wait_event(event, timeout=None):
     was_set = await loop.run_in_executor(None, partial(event.wait, timeout=timeout))
   else:
     was_set = await loop.run_in_executor(None, event.wait)
-    
+
   return was_set
 
 
@@ -611,11 +611,10 @@ async def notify_contact(**kwargs):
           print(" but there are no emergencies on DB", flush=True)
           await asyncio.sleep(5) # Do not continue, retry in 5 seconds
 
-      # Get saved emergency, set default message
-      emerg = pcontact_dict[pcontact][0]
+      # Set default message
       pcontact_dict[pcontact][1] = EMERG_SPOTTED
       while 1:
-        epayload_qs = await async_Emergency_Payload_filter(emergency=emerg)
+        epayload_qs = await async_Emergency_Payload_filter(emergency=emergency)
         exists = await epayload_qs.aexists()
         if exists:
           async for epayload in epayload_qs:
@@ -652,7 +651,7 @@ async def notify_contact(**kwargs):
 
       if ((stop_set == False) and (contact.sms_alerts == "Yes")):
         await asyncio.sleep(10)
-        send_sms_alert(contact, SMS_ALERT_MESSAGE)
+        await send_sms_alert(contact, SMS_ALERT_MESSAGE)
         sms_timestamp = datetime.now()
 
     # Wait 'constants.NOTIFICATION_PERIOD' seconds to send next notification
@@ -668,11 +667,11 @@ async def notify_contact(**kwargs):
         sms_delay = (get_sec_diff(datetime.now(), sms_timestamp)) // 60 # Convert it to minutes
         if (sms_delay >= constants.SMS_DELAY):
           await asyncio.sleep(10)
-          send_sms_alert(contact, SMS_ALERT_MESSAGE)
+          await send_sms_alert(contact, SMS_ALERT_MESSAGE)
           sms_timestamp = datetime.now()
           await asyncio.sleep(10)
 
-    # Clear event to tell all applicants for this chat to remain active unti notifier releases
+    # Clear event to tell all applicants for this chat to remain active until notifier releases
     # the locks
     notifier_event.clear()
     # Acquire comm_status lock to check about any pcontact.comm_status == 'pending' presence
@@ -745,7 +744,6 @@ def notifier(patient):
       notifier_value = notifier_dict[contact.echat_id]
       if (notifier_value == "Notifying"):
         print(f"There's an ongoing notification task for chat {contact.echat_id}", flush=True)
-        # print("There's an ongoing notification task for this chat.", flush=True)
         notifier.release()
         # Take note of the chat that has an ongoing notifier process
         busy_chats[contact.echat_id] = (notifier_event, applicant_event)
@@ -785,6 +783,8 @@ def notifier(patient):
       # Wait to exit until ongoing notifier from that chat enable us to do it
       notifier.release()
       print(f"Waiting for notifier_event from chat {echat_id} to be set to terminate", flush=True)
+      # Single-threaded process checking out other notifier's state to leave gracefully.
+      # No need to do the async wait with "await wait_event(notifier_event)"
       notifier_event.wait()
       print(f"chat's {echat_id} notifier_event set", flush=True)
     else:

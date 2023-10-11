@@ -21,6 +21,9 @@ NOTIFIER_WAIT = 30
 # Specify the notification period in seconds for chats
 NOTIFICATION_PERIOD = 25
 
+# Service url
+SERVICE_URL = "http://ec2-18-216-53-173.us-east-2.compute.amazonaws.com:8000/sigfox_messages"
+
 # Msg types 
 ALARM_MSG = 0
 LIMITS_MSG = 1
