@@ -1,6 +1,9 @@
+# Number of days to keep patients data,
+# after which all records will be erased from Database.
+KEEP_RECORDS = 10
 
 # Estimation of number of samples for each interval
-REGULAR_SHIP_UPDATE_SAMPLES = 315000
+# REGULAR_SHIP_UPDATE_SAMPLES = 315000
 
 # 22'40" (higher recovery sequence delay plus failed shipment (1 min) plus 
 # delivery delay (40 seconds) from Sigfox Backend)
@@ -21,8 +24,12 @@ NOTIFIER_WAIT = 30
 # Specify the notification period in seconds for chats
 NOTIFICATION_PERIOD = 25
 
+# Specify the maximum notification time, in minutes, while the notification process
+# is active without acknowledgement for both Telegram and SMS contact systems
+MAX_NOTIFICATION_TIME = 120
+
 # Service url
-SERVICE_URL = "http://ec2-18-216-53-173.us-east-2.compute.amazonaws.com:8000/sigfox_messages"
+SERVICE_URL = "http://ec2-18-188-48-139.us-east-2.compute.amazonaws.com:8000/sigfox_messages"
 
 # Msg types 
 ALARM_MSG = 0

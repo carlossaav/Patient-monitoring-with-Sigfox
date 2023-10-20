@@ -7,6 +7,8 @@
     <li>State: {{ doctor.state }} </li>
     </ul>
     {% if request.user.is_staff %}
+      <a href="{% url 'pdoctor_lookup' doctor.id %}">Check out doctor's patient list
+      </a><BR>
       <p><strong>Update doctor's availability to "available" or "busy"</strong></p>
       <form action="{% url 'doctor_detail' doctor.id %}" method="post">
       {% csrf_token %}
@@ -23,12 +25,12 @@
           Doctor's state options are "available" or "busy".</p>
         {% endif %}
       {% endif %}
-
       {% if att_req_qs %}
         <p><strong>Below there's a list of unattended requests from patients that require
         your attention:</strong><p>
         {% for att_req in att_req_qs %}
-          <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.patient }} {{ att_req }}
+          <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.request_timestamp }} 
+          {{ att_req.patient }}
           </a></li>
         {% endfor %}
       {% else %}
@@ -72,8 +74,7 @@
   {% else %}
     <p>Requested doctor wasn't found</p>
   {% endif %}
-  <BR><BR>
-  <a href="{% url 'index' %}">Back to main portal</a></p>
+  <BR><a href="{% url 'index' %}">Back to main portal</a></p>
 {% else %}
     <a href="{% url 'login' %}?next={{request.path}}">Log in to see this page</a>
 {% endif %}

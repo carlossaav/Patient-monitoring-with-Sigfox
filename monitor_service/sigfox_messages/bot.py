@@ -2,8 +2,8 @@ from sigfox_messages import utils, models, constants
 from telebot.async_telebot import AsyncTeleBot
 from telebot import types
 from multiprocessing import Process, Manager
-import os, sys, asyncio, vonage, ctypes
 from datetime import datetime, timedelta
+import os, sys, asyncio, vonage, ctypes, time
 
 # Get Telegram Bot token
 try:
@@ -677,11 +677,11 @@ def launch_bot():
     operations[e] = commands[i], functions[i]
     i += 1
 
-  print(operations)
-  print()
+  time.sleep(1) # Wait to print to stdout
+  print("\nDict of Telegram Bot options/operations:\n", flush=True)
+  print(operations, flush=True)
+  print("\n--Telegram Bot launched--", flush=True)
   asyncio.run(bot.polling())
-  # print("Bot polling finished")
-
 
 def main():
 
@@ -713,7 +713,11 @@ def main():
   contacts_lock.release()
 
   restart_chats() # Restart chat states
+  # Spawn a new process to erase old records from DB on a daily basis
+  p = Process(target=utils.check_old_records)
+  p.start()
   p = Process(target=launch_bot)
   p.start()
-  print("--Telegram Bot launched--\nYielding control to Django.")
+  time.sleep(3) # Let other processes print to stdout
+  print("--Yielding control to Django--")
   print()

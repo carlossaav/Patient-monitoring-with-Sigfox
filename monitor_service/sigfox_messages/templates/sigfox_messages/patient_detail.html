@@ -30,22 +30,33 @@
         <h3>There's an emergency currently active from this patient:
         <a href="{% url 'emergency_detail' ongoing_emergency.id %}">
         <strong>See emergency measures</a></strong></h3>
-        {% if not_attended %}
-          <p><strong>**</strong>If you want to quickly set the current emergency as "Attended" 
-          so every configured number<BR>stops receiving the emergency notification, 
-          click on the following link<strong>**</strong>:
-          <a href="{% url 'patient_detail' patient.dni %}?emergency_attended=true">
-          Set emergency as Attended</a></p>
+        {% if attended %}
+          <p><strong>**The ongoing emergency has already been acknowledged by our medical team**.
+          </strong></p>
         {% else %}
-          {% if attended %}
-            <p><strong>**The ongoing emergency has already been acknowledged by our medical team**.
-            </strong></p>
+          {% if not_attended %}
+            <p><strong>**</strong>If you want to quickly set the current emergency as "Attended" 
+            so every configured number<BR>stops receiving the emergency notification, 
+            click on the following link<strong>**</strong>:
+            <a href="{% url 'patient_detail' patient.dni %}?emergency_attended=true">
+            Set emergency as Attended</a></p>
+          {% endif %}
+        {% endif %}
+      {% else %}
+        {% if not_attended %}
+          <p><strong>**One emergency has taken place not long ago**</strong>
+          If you want to quickly set the last emergency as "Attended" <BR> so every configured number
+          stops receiving the emergency notification, click on the following link:<BR>
+          <a href="{% url 'patient_detail' patient.dni %}?emergency_attended=true"> Set emergency 
+          as Attended</a></p>
+        {% else %}
+          {% if attended_set %}
+            <p><strong>**Alert systems stopped**</strong></p>
           {% endif %}
         {% endif %}
       {% endif %}
-
       {% if bio_24 %}
-        <p>Check out daily-based measures gathered from the device: 
+        <p>Check out last daily-based recorded measures gathered from the device: 
         <a href="{% url 'biometrics24_detail' bio_24.patient %}">Day-based biometrics</a></p>
       {% else %}
         <p><strong>Today's biometrics are not available.</strong></p>
@@ -55,7 +66,7 @@
         <p>Check out patient's historical biometrics on emergencies:</p>
         <ul>
         {% for ebio in emergency_list %}
-          <li><a href="{% url 'emergency_detail' ebio.id %}">{{ ebio }}</a></li>
+          <li><a href="{% url 'emergency_detail' ebio.id %}">{{ ebio.emerg_timestamp }}</a></li>
         {% endfor %}
         </ul>
       {% else %}
@@ -99,7 +110,6 @@
         {% endif %}
       {% endif %}
 
-      <BR>
       {% if request.user.is_staff %}
         <p><strong>If you wish to modify current patient's information, please fill in the desired
         fields below:</strong></p>

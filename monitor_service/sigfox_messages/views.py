@@ -7,14 +7,15 @@ from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from sigfox_messages import utils, models, constants
 from multiprocessing import Process
-import asyncio, datetime, json
+import asyncio, json
+from datetime import datetime, timedelta
 from django.utils import timezone
 
 @require_GET
 @csrf_exempt
 def downlink(request, dev_id):
 
-  datetime_obj = timezone.make_aware(datetime.datetime.now())
+  datetime_obj = timezone.make_aware(datetime.now())
   date = datetime_obj.date()
   rtc = datetime_obj.strftime("%H:%M:%S")
 
@@ -30,7 +31,9 @@ def downlink(request, dev_id):
     # Create new history for dev_conf.dev_id device
     dev_hist = models.Device_History(dev_conf=dev_conf, date=date,
                                      running_since=datetime_obj,
-                                     uplink_count="0", downlink_count="0")
+                                     uplink_count="0", downlink_count="0",
+                                     higher_bpm_limit=dev_conf.higher_bpm_limit,
+                                     lower_bpm_limit=dev_conf.lower_bpm_limit)
 
   dev_hist.downlink_count = str(int(dev_hist.downlink_count) + 1)
   dev_hist.save()
@@ -63,7 +66,7 @@ def downlink(request, dev_id):
 @csrf_exempt
 def uplink(request):
 
-  datetime_obj = timezone.make_aware(datetime.datetime.now())
+  datetime_obj = timezone.make_aware(datetime.now())
   date = datetime_obj.date()
 
   try:
@@ -91,8 +94,6 @@ def uplink(request):
     print(output)
     raise Http404(output)
 
-
-  new_hist = 0
   migrate_bio = 0
   try:
     # Should return a single instance or nothing (exception)
@@ -104,7 +105,6 @@ def uplink(request):
         # Get the latest date when an uplink message was sent (prior to this one)
         last_date = qs[1].date
   except models.Device_History.DoesNotExist:
-    new_hist = 1 # Create a new history entry for the device
     try:
       d = models.Device_History.objects.filter(dev_conf=dev_conf).latest("date")
       last_date = d.date
@@ -112,10 +112,13 @@ def uplink(request):
     except models.Device_History.DoesNotExist:
       pass # No messages stored from this device. This is the first one
 
+    # Create a new history entry for the device
     dev_hist = models.Device_History(dev_conf=dev_conf, date=date,
                                      running_since=datetime_obj,
                                      last_msg_time=datetime_obj,
-                                     uplink_count="0", downlink_count="0")
+                                     uplink_count="0", downlink_count="0",
+                                     higher_bpm_limit=dev_conf.higher_bpm_limit,
+                                     lower_bpm_limit=dev_conf.lower_bpm_limit)
 
   # Update uplink_count 
   dev_hist.uplink_count = str(int(dev_hist.uplink_count) + 1)
@@ -129,7 +132,6 @@ def uplink(request):
 
   if migrate_bio: # Migrate data on Biometrics_24 to Biometrics
     new_bio_24 = 1
-    print(f"last_date = {last_date}, flush=True")
     models.Biometrics.objects.create(patient=patient,
                                      date=last_date,
                                      avg_bpm=biometrics_24.avg_bpm, 
@@ -149,7 +151,6 @@ def uplink(request):
                                      last_alarm_time=biometrics_24.last_alarm_time,
                                      last_limit_time=biometrics_24.last_limit_time,
                                      last_elimit_time=biometrics_24.last_elimit_time)
-
 
   if new_bio_24: # Following payload data will "reset" Biometrics_24 (first payload to write on it)
     biometrics_24 = models.Biometrics_24(patient=patient)
@@ -190,11 +191,10 @@ def uplink(request):
     ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_timestamp")
     if emergency:
       # check emergency creation/reactivation
-      datetime_obj2 = ebio.emerg_timestamp
-      seconds = utils.get_sec_diff(datetime_obj, datetime_obj2)
+      seconds = utils.get_sec_diff(datetime_obj, ebio.emerg_timestamp)
       if (seconds > constants.NEW_EMERG_DELAY):
-        ebio.active = "No"
-        ebio.save() # As we are creating a new one, update last emergency (actual ebio object) 'active' field on DB.
+        ebio.active = "No" # Deactivate emergency, create a new one
+        ebio.save()
         new_e = 1
       elif (ebio.active == "No"): # Still on the same 'logical' emergency, reactivate it
         ebio.active = "Yes"
@@ -208,26 +208,15 @@ def uplink(request):
   try:
     loc_info = body["computedLocation"]
     print(f"loc_info = {loc_info}")
-
-    loc_status = loc_info["status"]
-    if (loc_status == 1): # Geolocation successlly computed
+    if (loc_info["status"] == 1): # Geolocation successlly computed
       latitude = loc_info["lat"]
-      print(f"type(latitude) = {type(latitude)}")
-      print(f"latitude = {latitude}")
+      # print(f"latitude = {latitude}")
       longitude = loc_info["lng"]
-      print(f"type(longitude) = {type(longitude)}")
-      print(f"longitude = {longitude}")
-      # location = google_maps API call?? (i.e "Calle San Juan, Zamora") # Check out Google Maps API possibilities
+      # print(f"longitude = {longitude}")
       dev_hist.last_known_latitude = str(latitude)
       dev_hist.last_known_longitude = str(longitude)
-      # dev_hist.last_known_location = str(location)
-      dev_hist.save() # Save it here so it can be available for potential Telegram notifications
-    else:
-      pass # Do not update latitude/longitude/location
   except KeyError:
     print("Geolocation not available")
-    pass # Do not update latitude/longitude/location 
-
 
   if new_e: # create new emergency, Attention request
     from sigfox_messages.bot import wait_emergency
@@ -247,7 +236,6 @@ def uplink(request):
       emerg_event.clear()
     p = Process(target=utils.notifier, args=(patient, ))
     p.start()
-
 
   if emergency:
     ebio.emsg_count = str(int(ebio.emsg_count) + 1)
@@ -440,11 +428,8 @@ def uplink(request):
   if new_e:
     att_req.save()
     emerg_event.set() # att_req, ebio and epayload saved to DB. Set event
-  if new_hist:
-    models.Patient_Device_History.objects.create(dev_hist=dev_hist, patient=patient)
 
   return HttpResponse(status=HTTPStatus.NO_CONTENT)
-
 
 
 def register(request):
@@ -464,13 +449,20 @@ def register(request):
 # @csrf_exempt
 def index(request):
 
+  datetime_obj = timezone.make_aware(datetime.now())
   context = {}
   if (request.user.is_authenticated):
     err = 0
     if (request.user.is_staff):
       emerg_qs = models.Emergency_Biometrics.objects.filter(active="Yes")
       if (emerg_qs.exists()):
-        context["emergency_list"] = emerg_qs
+        emergency_list = []
+        for emergency in emerg_qs:
+          emergency = utils.check_emergency_deactivation(emergency, datetime_obj)
+          if (emergency.active == "Yes"): # Check whether it's still active
+            emergency_list.append(emergency)
+        if (emergency_list != []):
+          context["emergency_list"] = emergency_list
 
       if (request.method == "POST"):
         err, output = utils.ensure_params_presence(request.POST)
@@ -560,9 +552,11 @@ def index(request):
       patients_qs = models.Patient.objects.filter(user=request.user)
       for patient in patients_qs:
         try:
-          ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_timestamp")
-          if (ebio.active == "Yes"):
-            emergency_list.append(ebio)
+          emergency = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_timestamp")
+          if (emergency.active == "Yes"):
+            emergency = utils.check_emergency_deactivation(emergency, datetime_obj)
+            if (emergency.active == "Yes"): # Check again
+              emergency_list.append(emergency)
         except models.Emergency_Biometrics.DoesNotExist:
           pass
 
@@ -603,19 +597,6 @@ def index(request):
 
 
 @require_GET
-def emergency_lookup(request):
-
-  context = {}
-  if (request.user.is_authenticated and
-      request.user.is_staff):
-    emerg_qs = models.Emergency_Biometrics.objects.all()
-    if (emerg_qs.exists()):
-      context["emergency_list"] = emerg_qs
-
-  return render(request, "sigfox_messages/emergency_lookup.html", context=context)
-
-
-@require_GET
 def patient_lookup(request):
 
   context = {}
@@ -630,6 +611,7 @@ def patient_lookup(request):
 
 def patient_detail(request, patient_id):
 
+  datetime_obj = timezone.make_aware(datetime.now())
   context = {}
   if (request.user.is_authenticated):
     try:
@@ -650,34 +632,38 @@ def patient_detail(request, patient_id):
       pass
 
     try:
-      ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_timestamp")
-      # print(f"emergency timestamp = {ebio.emerg_timestamp}")
-      if (ebio.active == "Yes"):
-        context["ongoing_emergency"] = ebio
+      emergency = models.Emergency_Biometrics.objects.filter(patient=patient).latest("emerg_timestamp")
+      if (emergency.active == "Yes"):
+        emergency = utils.check_emergency_deactivation(emergency, datetime_obj)
+      att_req = models.Attention_request.objects.get(emergency=emergency)
 
-      att_req = models.Attention_request.objects.get(emergency=ebio)
-      if ((request.method == "GET") and
+      if (emergency.active == "Yes"):
+        context["ongoing_emergency"] = emergency
+
+      if ((att_req.status != "Attended") and
+          (request.method == "GET") and
           ("emergency_attended" in request.GET) and
           (request.GET["emergency_attended"] == "true")):
         att_req.status = "Attended"
         att_req.save()
+        if (emergency.active == "No"):
+          context["attended_set"] = 1
 
-      if (ebio.active == "Yes"):
-        if (att_req.status == "Attended"):
-          context["attended"] = 1
-        else:
-          context["not_attended"] = 1
+      if (att_req.status == "Attended"):
+        context["attended"] = 1
+      else:
+        context["not_attended"] = 1
     except models.Emergency_Biometrics.DoesNotExist:
-      pass
+      print("Emergency_Biometrics does not exist")
     except models.Attention_request.DoesNotExist:
-      pass
+      print("Attention Request does not exist")
 
-    emergency_list = models.Emergency_Biometrics.objects.filter(patient=patient)
-    bio_list = models.Biometrics.objects.filter(patient=patient)
-    if (emergency_list.exists()):
-      context["emergency_list"] = emergency_list
-    if (bio_list.exists()):
-      context["bio_list"] = bio_list
+    emerg_qs = models.Emergency_Biometrics.objects.filter(patient=patient)
+    bio_qs = models.Biometrics.objects.filter(patient=patient)
+    if (emerg_qs.exists()):
+      context["emergency_list"] = emerg_qs
+    if (bio_qs.exists()):
+      context["bio_list"] = bio_qs
 
     att_req_qs = models.Attention_request.objects.filter(patient=patient)
     if (not att_req_qs.exists()): # Empty att_req_qs QuerySet
@@ -696,10 +682,10 @@ def patient_detail(request, patient_id):
       if (auto_att_req != []):
         context["auto_att_req"] = auto_att_req
 
-    if ((request.method == "GET")
-        and ("unlink_acc" in request.GET)
-        and (request.GET["unlink_acc"] == "true")
-        and (patient.user != None)):
+    if ((patient.user != None) and
+        (request.method == "GET") and
+        ("unlink_acc" in request.GET) and
+        (request.GET["unlink_acc"] == "true")):
       patient.user = None
       patient.save()
       context["unlink"] = 1
@@ -783,7 +769,7 @@ def doctor_lookup(request):
 
 def doctor_detail(request, doctor_id):
 
-  datetime_obj = timezone.make_aware(datetime.datetime.now())
+  datetime_obj = timezone.make_aware(datetime.now())
   context = {}
 
   if (request.user.is_authenticated):
@@ -879,11 +865,6 @@ def device_lookup(request):
   return render(request, "sigfox_messages/device_lookup.html", context=context)
 
 
-@require_GET
-def entity_lookup(request, entity_class, template):
-  pass
-
-
 def device_config_detail(request, device_id):
 
   context = {}
@@ -937,7 +918,6 @@ def device_config_detail(request, device_id):
   return render(request, "sigfox_messages/device_config_detail.html", context=context)
 
 
-# device_config_id?date='x'/
 @require_GET
 def device_hist_detail(request, device_hist_id):
 
@@ -955,7 +935,6 @@ def device_hist_detail(request, device_hist_id):
   return render(request, "sigfox_messages/device_hist_detail.html", context=context)
 
 
-# patient_id?date='x'/
 @require_GET
 def biometrics_detail(request, biometrics_id):
 
@@ -966,8 +945,16 @@ def biometrics_detail(request, biometrics_id):
       context["not_allowed"] = 1
     else:
       context["bio"] = bio
+      dev_hist = models.Device_History.objects.get(dev_conf=bio.patient.dev_conf,
+                                                   date=bio.date)
+      context["date"] = dev_hist.date
+      context["ranges"] = utils.get_ranges(int(dev_hist.lower_bpm_limit),
+                                           int(dev_hist.higher_bpm_limit),
+                                           bio=bio)
   except models.Biometrics.DoesNotExist:
-    pass
+    print("Biometrics does not exist")
+  except models.Biometrics.DoesNotExist:
+    print("Device_History does not exist")
 
   return render(request, "sigfox_messages/biometrics_detail.html", context=context)
 
@@ -983,14 +970,20 @@ def biometrics24_detail(request, patient_id):
       context["not_allowed"] = 1
     else:
       context["bio"] = bio_24
-      context["today"] = 1
+      context["last_day"] = 1
+      dev_hist = models.Device_History.objects.filter(dev_conf=patient.dev_conf).latest("date")
+      context["date"] = dev_hist.date
+      context["ranges"] = utils.get_ranges(int(dev_hist.lower_bpm_limit),
+                                           int(dev_hist.higher_bpm_limit),
+                                           bio_24=bio_24)
   except models.Patient.DoesNotExist:
-    pass
+    print("Patient does not exist")
   except models.Biometrics_24.DoesNotExist:
-    pass
+    print("Biometrics_24 does not exist")
+  except models.Device_History.DoesNotExist:
+    print("Device_History does not exist")
 
   return render(request, "sigfox_messages/biometrics_detail.html", context=context)
-
 
 
 @require_GET
@@ -1003,12 +996,22 @@ def emergency_detail(request, emergency_id):
         (request.user != emergency.patient.user)):
       context["not_allowed"] = 1
     else:
+      if (emergency.active == "Yes"):
+        datetime_obj = timezone.make_aware(datetime.now())
+        emergency = utils.check_emergency_deactivation(emergency, datetime_obj)
       context["ebio"] = emergency
       epayload_qs = models.Emergency_Payload.objects.filter(emergency=emergency)
       if (epayload_qs.exists()):
         context["epayload_qs"] = epayload_qs
+      dev_hist = models.Device_History.objects.get(dev_conf=emergency.patient.dev_conf,
+                                                   date=emergency.emerg_timestamp.date())
+      context["ranges"] = utils.get_ranges(int(dev_hist.lower_bpm_limit),
+                                           int(dev_hist.higher_bpm_limit),
+                                           emergency=emergency)
   except models.Emergency_Biometrics.DoesNotExist:
-    pass
+    print("Emergency not found")
+  except models.Device_History.DoesNotExist:
+    print("Device_History not found")
 
   return render(request, "sigfox_messages/emergency_detail.html", context=context)
 
@@ -1024,8 +1027,15 @@ def epayload_detail(request, epayload_id):
       context["not_allowed"] = 1
     else:
       context["epayload"] = epayload
+      dev_hist = models.Device_History.objects.get(dev_conf=epayload.emergency.patient.dev_conf,
+                                                   date=epayload.emergency.emerg_timestamp.date())
+      context["ranges"] = utils.get_ranges(int(dev_hist.lower_bpm_limit),
+                                           int(dev_hist.higher_bpm_limit),
+                                           epayload=epayload)
   except models.Emergency_Payload.DoesNotExist:
-    pass
+    print("Epayload not found")
+  except models.Device_History.DoesNotExist:
+    print("Device_History not found")
 
   return render(request, "sigfox_messages/epayload_detail.html", context=context)
 
@@ -1048,12 +1058,12 @@ def att_req_detail(request, att_req_id):
     att_req = None
 
   if (att_req != None):
-    if ((request.method == "GET") and
+    if ((att_req.status != "Attended") and
         ("emergency_attended" in request.GET) and
         (request.GET["emergency_attended"] == "true")):
       att_req.status = "Attended"
       att_req.save()
-    if (att_req.status == "Unattended"):
+    elif (att_req.status == "Unattended"):
       context["not_attended"] = 1
 
   return render(request, "sigfox_messages/attention_request_detail.html",

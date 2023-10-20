@@ -21,13 +21,11 @@
 #define USE_ARDUINO_INTERRUPTS false  // Set-up low-level interrupts for most acurate BPM math.
 // #define US_PS_INTERRUPTS false
 
-
 #include <PulseSensorPlayground.h>
 #include <RTCZero.h>
 #include <SigFox.h>
 #include <Wire.h>
 #include <Protocentral_MAX30205.h>
-
 
 #define PULSE_PIN 0                // PulseSensor WIRE connected to ANALOG PIN 0
 #define INPUT_BUTTON_PIN 5         // DIGITAL PIN 5 USED TO INTERRUPT whenever the button is pressed
@@ -35,9 +33,7 @@
 #define LIMIT_EXCEEDED_LED 7       // Blinks whenever a bpm limit exceeded occurs
 #define EMERGENCY_LED 8            // Used on emergencies
 
-
 #define PULSE_THRESHOLD 2150  // Determine which Signal to "count as a beat" and which to ignore
-
 
 #define UPPER_BPM_LIMIT 135
 #define LOWER_BPM_LIMIT 55
@@ -57,7 +53,6 @@
 
 #define MAX_ROUNDS 30
 
-
 /** Variables **/
 
 struct sum {
@@ -73,12 +68,16 @@ struct range {
   int icount;  // Times bpm value fell within the range in whole interval
 };
 
+byte range_top; // Determined by ranges width
+byte ubpm_lim = UPPER_BPM_LIMIT;
+byte lbpm_lim = LOWER_BPM_LIMIT;
+
 /* To later process where bpm readings have been falling across the interval, 
  * we'll define a set of BPM Ranges:
- * ranges[0] stores reading counts under 60 bpm
- * ranges[1] stores reading counts between 60-89 bpm
- * ranges[2] stores reading counts between 90-120 bpm
- * ranges[3] stores reading counts higher than 120 bpm
+ * ranges[0] stores bpm reading counts in range [0, lbpm_lim-1]
+ * ranges[1] stores bpm reading counts in range [lbpm_lim, range_top]
+ * ranges[2] stores bpm reading counts in range [range_top+1, ubpm_lim]
+ * ranges[3] stores bpm reading counts in range [ubpm_lim+1, infinite]
  */
 struct range ranges[4];
 
@@ -148,6 +147,14 @@ void setup() {
     delay(30000);
   }
 
+  set_range_top();
+
+  Serial.print("First range: <"); Serial.println(lbpm_lim);
+  Serial.print("Second range: ["); Serial.print(lbpm_lim);
+  Serial.print(", "); Serial.print(range_top); Serial.println("]");
+  Serial.print("Third range: ["); Serial.print(range_top+1);
+  Serial.print(", "); Serial.print(ubpm_lim); Serial.println("]");
+  Serial.print("Higher range: >"); Serial.println(ubpm_lim);
 
   for (int i = 0; i < (sizeof(ranges) / sizeof(ranges[0])); i++) {
     ranges[i].rcount = 0;
@@ -172,7 +179,6 @@ void setup() {
   rtc.setDate(14, 4, 23);
 }
 
-
 // Flash led to show things didn't work.
 void flash_led(int led) {
   digitalWrite(led, LOW);
@@ -181,6 +187,12 @@ void flash_led(int led) {
   delay(BUG_FLASH);
 }
 
+void set_range_top() {
+  byte aux = (byte)floor((UPPER_BPM_LIMIT - lbpm_lim)/2);
+  range_top = lbpm_lim + aux;
+  if (((ubpm_lim - lbpm_lim) % 2) == 0) // even number
+    range_top--;
+}
 
 void get_temperature() {
 
@@ -212,8 +224,6 @@ void get_temperature() {
   Serial.println();
 }
 
-
-
 void print_avgs(unsigned int nsamples, byte sum_field) {
 
   unsigned int sum_bpm_value, sum_ibi_value;
@@ -235,7 +245,6 @@ void print_avgs(unsigned int nsamples, byte sum_field) {
   Serial.println();
 }
 
-
 void print_ranges(unsigned int nsamples, byte range_field) {
 
   int rvalue;
@@ -243,9 +252,10 @@ void print_ranges(unsigned int nsamples, byte range_field) {
   int max_range_ids[3] = { -1, -1, -1 };
   byte match, match_count, counter = 0;
 
+  // We want to save the indexes of the three highest values of ranges[] on max_range_ids[]
   match = 0;
   match_count = 0;
-  while (counter != 3) {  // We want to save the indexes of the three highest values of ranges[] on max_range_ids[]
+  while (counter != 3) {
     byte skipped = 0;
     for (int i = 0; i < (sizeof(ranges) / sizeof(ranges[0])); i++) {
       if (counter != 0) {
@@ -286,24 +296,34 @@ void print_ranges(unsigned int nsamples, byte range_field) {
 
   for (int i = 0, j; i < (sizeof(max_range_ids) / sizeof(max_range_ids[0])); i++) {
     j = max_range_ids[i];
+    if (j>=0 && j<=3) {
+      Serial.print("ranges[");
+      Serial.print(j);
+      Serial.print("] (Range [");
+    }
     switch (j) {
       case 0:
-        Serial.print("ranges[0] (Range < 60 bpm): ");
+        Serial.print("0, "); Serial.print(lbpm_lim-1);
         break;
       case 1:
-        Serial.print("ranges[1] (Range [60-89] bpm): ");
+        Serial.print(lbpm_lim); Serial.print(", ");
+        Serial.print(range_top);
         break;
       case 2:
-        Serial.print("ranges[2] (Range [90-120] bpm): ");
+        Serial.print(range_top+1); Serial.print(", ");
+        Serial.print(ubpm_lim);
         break;
       case 3:
-        Serial.print("ranges[3] (Range > 120 bpm): ");
+        Serial.print(ubpm_lim+1); Serial.print(", infinite");
         break;
       default:
         Serial.println("Avoid computing percentages...");
         Serial.println();
         continue;
     }
+    
+    if (j>=0 && j<=3)
+      Serial.print("] BPM): ");
 
     if (range_field == ROUND_FIELD) rvalue = ranges[j].rcount;
     else rvalue = ranges[j].icount;
@@ -315,15 +335,12 @@ void print_ranges(unsigned int nsamples, byte range_field) {
   Serial.println();
 }
 
-
-
 /* Interrupt Service Routine button_pressed(),
  * triggered whenever the user pushes the emergency button
  */
 void button_pressed() {
   button_flag = 1;
 }
-
 
 void handle_button_pushed() {
   if (button_pushed) {
@@ -338,8 +355,6 @@ void handle_button_pushed() {
   Serial.println();
   digitalWrite(EMERGENCY_LED, HIGH);
 }
-
-
 
 /* Overloaded function series to check if any 
  * limit has been exceeded */
@@ -360,7 +375,6 @@ byte check_lower_limit(int ibi) {
   return (ibi < LOWER_IBI_LIMIT);
 }
 
-
 byte bytecast(int value) {
   if (value < 0)
     return (byte)0;
@@ -369,12 +383,13 @@ byte bytecast(int value) {
   return byte(value);
 }
 
-
 void increase_range(byte index) {
-  ranges[index].rcount++;
-  ranges[index].icount++;
+  if (index>=0 && index<(sizeof(ranges)/sizeof(ranges[0]))) {
+    ranges[index].rcount++;
+    ranges[index].icount++;
+  }
+  else Serial.println("Index out of range");
 }
-
 
 void loop() {
 
@@ -411,10 +426,10 @@ void loop() {
     sum_ibi.isum += ibi;
     bpm_ibi_sample_counter++;
 
-    if (bpm<60) increase_range(0);
-    else if (bpm>=60 && bpm <=89) increase_range(1);
-    else if (bpm>=90 && bpm <=120) increase_range(2);
-    else increase_range(3); // bpm > 120
+    if (bpm<lbpm_lim) increase_range(0);
+    else if (bpm>=lbpm_lim && bpm<=range_top) increase_range(1);
+    else if (bpm>=(range_top+1) && bpm<=ubpm_lim) increase_range(2);
+    else increase_range(3); // bpm > ubpm_lim
 
     if (bpm > max_bpm_round)
       max_bpm_round = bpm;
@@ -455,7 +470,6 @@ void loop() {
 
     if (limit) digitalWrite(LIMIT_EXCEEDED_LED, HIGH);
   }
-
 
   if ((duration = (millis() - tstamp)) >= ROUND_DURATION) {
 

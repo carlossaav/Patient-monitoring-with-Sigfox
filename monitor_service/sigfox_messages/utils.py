@@ -3,7 +3,8 @@ from asgiref.sync import sync_to_async, async_to_sync
 from datetime import datetime, timedelta
 from functools import partial
 from random import randint
-import asyncio, struct
+from django.utils import timezone
+import asyncio, struct, time
 
 ALARM_PUSHED = "alarm_pushed"
 EMERG_SPOTTED = "emergency_spotted"
@@ -160,6 +161,136 @@ def get_attr_name(range_id):
     return "third_range"
   else:
     return "higher_range"
+
+
+def get_ranges(lower_bpm_limit, higher_bpm_limit, **kwargs):
+
+  if ("emergency" in kwargs):
+    lower_rvalue = kwargs["emergency"].lower_range
+    second_rvalue = kwargs["emergency"].second_range
+    third_rvalue =  kwargs["emergency"].third_range
+    higher_rvalue =  kwargs["emergency"].higher_range
+  elif ("epayload" in kwargs):
+    lower_rvalue = kwargs["epayload"].lower_range
+    second_rvalue = kwargs["epayload"].second_range
+    third_rvalue =  kwargs["epayload"].third_range
+    higher_rvalue =  kwargs["epayload"].higher_range
+  elif ("bio_24" in kwargs):
+    lower_rvalue = kwargs["bio_24"].lower_range
+    second_rvalue = kwargs["bio_24"].second_range
+    third_rvalue =  kwargs["bio_24"].third_range
+    higher_rvalue =  kwargs["bio_24"].higher_range
+  elif ("bio" in kwargs):
+    lower_rvalue = kwargs["bio"].lower_range
+    second_rvalue = kwargs["bio"].second_range
+    third_rvalue =  kwargs["bio"].third_range
+    higher_rvalue =  kwargs["bio"].higher_range
+  else:
+    print("Missing arguments on get_ranges()")
+    return []
+
+  aux = (higher_bpm_limit - lower_bpm_limit) // 2 # Floor division
+  range_top = lower_bpm_limit + aux
+  if (((higher_bpm_limit - lower_bpm_limit) % 2) == 0): # Even number
+    range_top-=1
+
+  lower_range = "<" + str(lower_bpm_limit)
+  second_range = "[" + str(lower_bpm_limit) + ", " + str(range_top) + "]"
+  third_range = "[" + str(range_top+1) + ", " + str(higher_bpm_limit) + "]"
+  higher_range = ">" + str(higher_bpm_limit)
+
+  return [(lower_range, lower_rvalue),
+          (second_range, second_rvalue),
+          (third_range, third_rvalue),
+          (higher_range, higher_rvalue)]
+
+
+def check_emergency_deactivation(emergency, datetime_obj):
+
+  seconds = get_sec_diff(datetime_obj, emergency.emerg_timestamp)
+  if (seconds > constants.NEW_EMERG_DELAY):
+    print("Deactivating emergency", end=' ', flush=True)
+    print(emergency, flush=True)
+    emergency.active = "No" # Deactivate emergency
+    emergency.save()
+
+  return emergency
+
+
+# Erase all Biometrics older than 'days' days
+def check_biometrics_deletion(days=constants.KEEP_RECORDS):
+
+  datetime_obj = timezone.make_aware(datetime.now())
+  key_date = datetime_obj.date() - timedelta(days=days)
+
+  # Erase Biometrics records
+  qs = models.Biometrics.objects.filter(date__lt=key_date)
+  if (qs.exists()):
+    qs.delete()
+
+  for patient in models.Patient.objects.all():
+    try:
+      bio_24 = models.Biometrics_24.objects.get(patient=patient)
+      dev_hist = models.Device_History.objects.filter(dev_conf=patient.dev_conf).latest("date")
+    except models.Biometrics_24.DoesNotExist:
+      continue
+    except models.Device_History.DoesNotExist:
+      dev_hist = None
+
+    if (dev_hist == None): # bio_24 not empty
+      bio_24.delete()
+    else:
+      # Erase bio_24 instance if it was recorded more than 'days' days ago
+      delta = (datetime_obj.date() - dev_hist.date)
+      if (delta.days > days):
+        bio_24.delete()
+        dev_hist.delete() # Erase also associated entry in Device_History
+
+
+# Erase all Emergencies older than 'days' days and
+# epayloads/attention requests linked to them
+def check_emergency_deletion(days=constants.KEEP_RECORDS):
+
+  datetime_obj = timezone.make_aware(datetime.now())
+  key_datetime_obj = datetime_obj - timedelta(days=days)
+
+  for emergency in models.Emergency_Biometrics.objects.filter(emerg_timestamp__lt=key_datetime_obj):
+    qs = models.Emergency_Payload.objects.filter(emergency=emergency)
+    if (qs.exists()):
+      qs.delete()
+    try:
+      att_req = models.Attention_request.objects.get(emergency=emergency)
+      att_req.delete()
+    except models.Attention_request.DoesNotExist:
+      pass
+    emergency.delete()
+
+
+# Erase all Device_History older than 'days' days
+def check_device_history_deletion(days=constants.KEEP_RECORDS):
+
+  datetime_obj = timezone.make_aware(datetime.now())
+  key_date = datetime_obj.date() - timedelta(days=days)
+
+  qs = models.Device_History.objects.filter(date__lt=key_date)
+  if (qs.exists()):
+    qs.delete()
+
+
+# Erases all records older than 'days' days
+def check_old_records(days=constants.KEEP_RECORDS):
+  # This function is meant to be used by a separate process.
+  # It gets executed once a day, perform its necessary checkings
+  # over Database models, and goes to sleep again, for 24 hours,
+  # until next execution. It runs over and over and over concurrently
+  # with the Monitor Service and the Telegram Bot.
+  while 1:
+    print("Performing the checking over old database records..", flush=True)
+    check_biometrics_deletion(days=days)
+    check_device_history_deletion(days=days)
+    check_emergency_deletion(days=days)
+    print("Checking done. Sleeping 24 hours until next checking..", flush=True)
+    time.sleep(24*60*60)
 
 
 # Substract one day to the given date
@@ -641,6 +772,7 @@ async def notify_contact(**kwargs):
     # Send 4 initial notifications
     if origin:
       origin = 0
+      origin_time = datetime.now() # Save starting notification timestamp
       message = await get_emergency_message(pcontact_dict)
       for e in range(1, 5):
         await send(async_lock, contact.echat_id, message=message)
@@ -706,6 +838,20 @@ async def notify_contact(**kwargs):
       return # Leave notification loop
     else: # notify == True
       # One or more pcontact.comm_status are still in "Pending" state and user haven't noticed yet
+      delta = datetime.now() - origin_time
+      elapsed_minutes = int(delta.total_seconds() // 60)
+      if (elapsed_minutes >= constants.MAX_NOTIFICATION_TIME):
+        message = "(Maximum notification time for this phone number consumed.\n"
+        message += "Exiting notification process)\n\n"
+        await release_notifier(exit_message=message+STOPPED_MESSAGE,
+                               pcontact_list=pcontact_list,
+                               pcontact_dict=origin_pcontact_dict,
+                               applicant_event=applicant_event,
+                               comm_status=comm_status,
+                               notifier=notifier,
+                               notifier_dict=notifier_dict,
+                               async_lock=async_lock)
+        return # Leave notification loop
       comm_status.release()
       notifier_event.set()
 

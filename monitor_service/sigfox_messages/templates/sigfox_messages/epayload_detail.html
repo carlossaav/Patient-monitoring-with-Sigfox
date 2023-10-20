@@ -3,9 +3,9 @@
     <p><strong>You're not allowed to see this information.</strong></p>
   {% else %}
     {% if epayload %}
-      <p><strong>Payload raised on emergency 
-      <a href="{% url 'emergency_detail' epayload.emergency.id %}">{{ epayload.emergency }}</a>
-      </strong></p>
+      <p><strong>Individual payload from the emergency raised at 
+      <a href="{% url 'emergency_detail' epayload.emergency.id %}">
+      {{ epayload.emergency.emerg_timestamp }}</a></strong></p>
       <ul>
       <li><strong>Payload reason of the emergency:</strong> {{ epayload.ereason_payload }}</li>
       <li>Message type: {{ epayload.msg_type }}</li>
@@ -18,15 +18,17 @@
       <li>Minimum ibi recorded: {{ epayload.min_ibi }} </li>
       <li>Time distribution of bpm ranges on the interval:</li>
       <ul>
-      <li>&lt;60 bpm: {{ epayload.lower_range }} %</li>
-      <li>[60-89] bpm: {{ epayload.second_range }}%</li>
-      <li>[90-120] bpm: {{ epayload.third_range }}%</li>
-      <li>&gt;120 bpm: {{ epayload.higher_range }}%</li>
+      {% if ranges %}
+        {% for t in ranges %}
+          <li>{{ t.0 }} bpm: {{ t.1 }}%</li>
+        {% endfor %}
+      {% else %}
+        <li>Not available</li>
+      {% endif %}
       </ul>
       <li>Temperature record: {{ epayload.temp }}</li>
       <li>Elapsed milliseconds: {{ epayload.elapsed_ms }}</li>
       </ul>
-      <BR>
     {% else %}
       <p>Emergency payload data not found</p>
     {% endif %}

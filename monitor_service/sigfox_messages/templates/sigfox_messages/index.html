@@ -8,7 +8,8 @@
   {% if emergency_list %}
     <h3>Below are currently active emergencies that may require your attention:</h3>
     {% for ebio in emergency_list %}
-      <li><a href="{% url 'emergency_detail' ebio.id %}">{{ ebio.patient }}: {{ ebio }}
+      <li><a href="{% url 'emergency_detail' ebio.id %}">{{ ebio.emerg_timestamp }}: 
+      {{ ebio.patient }}
       </a></li>
     {% endfor %}
   {% else %}

@@ -6,7 +6,7 @@
       <p><strong>Biometrics gathered from patient '
       <a href="{% url 'patient_detail' ebio.patient %}">{{ ebio.patient.name }} 
       {{ ebio.patient.surname }}</a>' on the emergency triggered at </strong>
-      {{ ebio }}</p>
+      {{ ebio.emerg_timestamp }}</p>
       <ul>
       <li><strong>Emergency active:</strong> {{ ebio.active }}</li>
       <li>Generated payloads on the emergency: {{ ebio.emsg_count }}</li>
@@ -18,10 +18,13 @@
       <li>Minimum ibi recorded: {{ ebio.min_ibi }} </li>
       <li>Time distribution of bpm ranges over the emergency:</li>
       <ul>
-      <li>&lt;60 bpm: {{ ebio.lower_range }} %</li>
-      <li>[60-89] bpm: {{ ebio.second_range }}%</li>
-      <li>[90-120] bpm: {{ ebio.third_range }}%</li>
-      <li>&gt;120 bpm: {{ ebio.higher_range }}%</li>
+      {% if ranges %}
+        {% for t in ranges %}
+          <li>{{ t.0 }} bpm: {{ t.1 }}%</li>
+        {% endfor %}
+      {% else %}
+        <li>Not available</li>
+      {% endif %}
       </ul>
       <li>Last temperature recorded: {{ ebio.last_temp }} </li>
       <li>Average temperature: {{ ebio.avg_temp }} </li>

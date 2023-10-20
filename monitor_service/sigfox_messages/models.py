@@ -24,9 +24,10 @@ class Device_History(models.Model):
   last_dev_state = models.CharField(max_length=25)
   last_known_latitude = models.CharField(max_length=25)
   last_known_longitude = models.CharField(max_length=25)
-  # last_known_loc = models.CharField(max_length=50)
   uplink_count = models.CharField(max_length=3)
   downlink_count = models.CharField(max_length=3)
+  higher_bpm_limit = models.CharField(max_length=3)
+  lower_bpm_limit = models.CharField(max_length=3)
 
   def __str__(self):
     return str(self.dev_conf) + str(self.date)
@@ -78,15 +79,6 @@ class Patient_Contact(models.Model):
 
   def __str__(self):
     return str(self.patient) + ", " + str(self.contact)
-
-
-class Patient_Device_History(models.Model):
-
-  dev_hist = models.OneToOneField(Device_History, on_delete=models.CASCADE, primary_key=True)
-  patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-
-  def __str__(self):
-    return str(self.patient) + ", " + str(self.dev_hist)
 
 
 class Emergency_Biometrics(models.Model):
