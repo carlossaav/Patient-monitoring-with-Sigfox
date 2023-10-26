@@ -313,10 +313,10 @@ def get_bio(dev_hist, bio_24=None, ebio=None):
 
   if (bio_24 != None):
     bio = bio_24
-    msg_count = int(dev_hist.uplink_count)
+    msg_count = dev_hist.uplink_count
   elif (ebio != None):
     bio = ebio
-    msg_count = int(ebio.emsg_count)
+    msg_count = ebio.emsg_count
   else: # Failed update
     bio = None
     msg_count = None
@@ -391,7 +391,7 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
       bio.min_ibi = str(attr_value)
     elif ((attr == "avg_bpm") or (attr == "avg_ibi")):
 
-      if ((ebio != None) and (int(dev_hist.uplink_count)==1)):
+      if ((ebio != None) and (dev_hist.uplink_count==1)):
         # (ebio.emsg_count > 1), but it's the first message of the day
         date = delta(date) # Purpose is getting the time of yesterday's last message
         try:
@@ -456,7 +456,7 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
           # device's computing time from the second message onwards to update the average(s).
           pass
 
-      elif ((ebio != None) and (int(dev_hist.uplink_count) > 1)): # (ebio.emsg_count == 1)
+      elif ((ebio != None) and (dev_hist.uplink_count > 1)): # (ebio.emsg_count == 1)
         seconds = get_sec_diff(datetime_obj, dev_hist.last_msg_time)
         if (seconds <= constants.MAX_TIME_DELAY):
           setattr(bio, sum_field, (attr_value * seconds * 500))
@@ -943,7 +943,7 @@ def notifier(patient):
   print("Bye bye, says notifier", flush=True)
 
 
-def ensure_params_presence(dictionary):
+def check_empty_params(dictionary):
   err = 0
   output = ""
   for param in dictionary:

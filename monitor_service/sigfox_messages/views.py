@@ -5,7 +5,7 @@ from django.shortcuts import render
 from http import HTTPStatus
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
-from sigfox_messages import utils, models, constants
+from sigfox_messages import utils, models, constants, forms
 from multiprocessing import Process
 import asyncio, json
 from datetime import datetime, timedelta
@@ -31,11 +31,11 @@ def downlink(request, dev_id):
     # Create new history for dev_conf.dev_id device
     dev_hist = models.Device_History(dev_conf=dev_conf, date=date,
                                      running_since=datetime_obj,
-                                     uplink_count="0", downlink_count="0",
+                                     uplink_count=0, downlink_count=0,
                                      higher_bpm_limit=dev_conf.higher_bpm_limit,
                                      lower_bpm_limit=dev_conf.lower_bpm_limit)
 
-  dev_hist.downlink_count = str(int(dev_hist.downlink_count) + 1)
+  dev_hist.downlink_count += 1
   dev_hist.save()
 
   # Build payload following rtc:bt:msg:ub:lb:bx downlink payload format
@@ -47,11 +47,11 @@ def downlink(request, dev_id):
   for e in l[1:]:
     payload += format(e, "06b")
 
-  payload += format(int(dev_conf.bpm_limit_window), "07b")   # bt
-  payload += format(int(dev_hist.uplink_count), "08b")       # msg  
-  payload += format(int(dev_conf.higher_bpm_limit), "08b")   # ub
-  payload += format(int(dev_conf.lower_bpm_limit), "08b")    # lb
-  payload += format(int(dev_conf.min_delay), "016b")         # bx
+  payload += format(dev_conf.bpm_limit_window, "07b")   # bt
+  payload += format(dev_hist.uplink_count, "08b")       # msg  
+  payload += format(dev_conf.higher_bpm_limit, "08b")   # ub
+  payload += format(dev_conf.lower_bpm_limit, "08b")    # lb
+  payload += format(dev_conf.min_delay, "016b")         # bx
 
   payload = hex(int(payload, 2))[2:] # Convert to hex string. Skip '0x' chars
 
@@ -98,7 +98,7 @@ def uplink(request):
   try:
     # Should return a single instance or nothing (exception)
     dev_hist = models.Device_History.objects.get(dev_conf=dev_conf, date=date)
-    if (int(dev_hist.uplink_count) == 0):
+    if (dev_hist.uplink_count == 0):
       qs = models.Device_History.objects.filter(dev_conf=dev_conf).order_by("-date")
       if (len(qs) > 1):
         migrate_bio = 1
@@ -116,12 +116,11 @@ def uplink(request):
     dev_hist = models.Device_History(dev_conf=dev_conf, date=date,
                                      running_since=datetime_obj,
                                      last_msg_time=datetime_obj,
-                                     uplink_count="0", downlink_count="0",
+                                     uplink_count=0, downlink_count=0,
                                      higher_bpm_limit=dev_conf.higher_bpm_limit,
                                      lower_bpm_limit=dev_conf.lower_bpm_limit)
 
-  # Update uplink_count 
-  dev_hist.uplink_count = str(int(dev_hist.uplink_count) + 1)
+  dev_hist.uplink_count += 1  # Update uplink_count
 
   new_bio_24 = 0
   try:
@@ -223,7 +222,7 @@ def uplink(request):
 
     ebio = models.Emergency_Biometrics(patient=patient,
                                        emerg_timestamp=datetime_obj,
-                                       emsg_count="0",
+                                       emsg_count=0,
                                        active="Yes")
     att_req = models.Attention_request(emergency=ebio,
                                        patient=patient,
@@ -238,7 +237,7 @@ def uplink(request):
     p.start()
 
   if emergency:
-    ebio.emsg_count = str(int(ebio.emsg_count) + 1)
+    ebio.emsg_count += 1
 
   # Update biometrics timestamps
   if (msg_type == constants.ALARM_MSG):
@@ -333,8 +332,8 @@ def uplink(request):
       utils.update_bpm_ibi(dev_hist, "max_bpm", max_bpm, None, ebio)
       utils.update_bpm_ibi(dev_hist, "min_bpm", min_bpm, None, ebio)
 
-    if ((max_bpm > int(dev_conf.higher_ebpm_limit)) or
-        (min_bpm < int(dev_conf.lower_ebpm_limit))):
+    if ((max_bpm > dev_conf.higher_ebpm_limit) or
+        (min_bpm < dev_conf.lower_ebpm_limit)):
       biometrics_24.last_elimit_time = datetime_obj
 
   if (payload_format==0 or payload_format==2 or payload_format==4):
@@ -435,13 +434,12 @@ def uplink(request):
 def register(request):
   
   # Process/show registration form
+  form = UserCreationForm()
   if (request.method == 'POST'):
     form = UserCreationForm(request.POST)
     if form.is_valid():
-      new_user = form.save()
+      form.save() # Add a new User
       return HttpResponseRedirect("/sigfox_messages/")
-  else:
-    form = UserCreationForm()
 
   return render(request, "registration/register.html", {'form': form})
 
@@ -452,7 +450,6 @@ def index(request):
   datetime_obj = timezone.make_aware(datetime.now())
   context = {}
   if (request.user.is_authenticated):
-    err = 0
     if (request.user.is_staff):
       emerg_qs = models.Emergency_Biometrics.objects.filter(active="Yes")
       if (emerg_qs.exists()):
@@ -463,90 +460,7 @@ def index(request):
             emergency_list.append(emergency)
         if (emergency_list != []):
           context["emergency_list"] = emergency_list
-
-      if (request.method == "POST"):
-        err, output = utils.ensure_params_presence(request.POST)
-        if not err:
-          if ("doctor name" in request.POST): # Add a new doctor to Database
-            name = request.POST['doctor name']
-            surname = request.POST['doctor surname']
-            state = request.POST['doctor state']
-            qs = models.Doctor.objects.filter(name=name, surname=surname)
-            if (qs.exists()):
-              err = 1
-              output = "There's an existent doctor with that name on database. Registration failed"
-            else:
-              doctor = models.Doctor(name=name, surname=surname, state=state)
-              doctor.save()
-              context["doctor_registered"] = 1
-          elif ("dev id" in request.POST): # Add a new device to Database
-            dev_id = request.POST['dev id']
-            higher_bpm_limit = request.POST['higher bpm limit']
-            lower_bpm_limit = request.POST['lower bpm limit']
-            higher_ebpm_limit = request.POST['higher ebpm limit']
-            lower_ebpm_limit = request.POST['lower ebpm limit']
-            bpm_limit_window = request.POST['bpm limit window']
-            min_delay = request.POST['min delay']
-            dev_conf = models.Device_Config(dev_id=dev_id,
-                                            higher_bpm_limit=higher_bpm_limit,
-                                            lower_bpm_limit=lower_bpm_limit,
-                                            higher_ebpm_limit=higher_ebpm_limit,
-                                            lower_ebpm_limit=lower_ebpm_limit,
-                                            bpm_limit_window=bpm_limit_window,
-                                            min_delay=min_delay)
-            dev_conf.save()
-            context["device_registered"] = 1
-          elif ("patient dni" in request.POST): # Add a new patient to Database
-            l = request.POST['patient doctor'].split()
-            dname = l[0]
-            dsurname = ' '.join(l[1:])
-            try: # Check out that doctor's presence
-              doctor = models.Doctor.objects.get(name=dname, surname=dsurname)
-            except models.Doctor.DoesNotExist:
-              output = "Doctor with name '" + request.POST['patient doctor']
-              output += "' has not been found in our Database.\nYou must first register such "
-              output += "doctor before adding its new patient."
-              print(output)
-              return render(request, "sigfox_messages/index.html", context={"error_message": output})
-
-            # Let's check if there's any patient registered on DB with such dni
-            dni = request.POST['patient dni']
-            qs = models.Patient.objects.filter(dni=dni)
-            if (qs.exists()):
-              err = 1
-              output = "There's another patient on DB with dni '" + dni + "'. Registration failed"
-            else:
-              # Check if the device with the id provided has already been registered on database.
-              qs = models.Device_Config.objects.filter(dev_id=request.POST['patient device id'])
-              if (qs.exists()):
-                # There must be only one element on the QuerySet, (primary key contraint)
-                dev_conf = qs.get()
-                # Is this device already linked to any patient?
-                qs = models.Patient.objects.filter(dev_conf=dev_conf)
-                if (qs.exists()):
-                  err = 1
-                  output = "There's another patient currently linked to that device."
-                  output += " Registration failed"
-                else: # expected behaviour
-                  name = request.POST['patient name']
-                  surname = request.POST['patient surname']
-                  age = request.POST['patient age']
-                  follow_up = request.POST['patient follow-up']
-
-                  patient = models.Patient(dni=dni, name=name, surname=surname, age=age,
-                                           user=None, doctor=doctor, dev_conf=dev_conf,
-                                           follow_up=follow_up)
-                  patient.save()
-                  context["patient_registered"] = 1
-                  
-                  from sigfox_messages.bot import wait_emergency, manager
-                  wait_emergency[patient.dni] = manager.Event()
-              else:
-                err = 1
-                output = "Device with device id '" + request.POST['patient device id']
-                output += "' has not been found in our Database.\nYou must first register a new "
-                output += " device with such device identifier before adding a new patient."
-    else:
+    else: # Regular user
       emergency_list = []
       doctors_qs = models.Doctor.objects.filter(state="available")
       patients_qs = models.Patient.objects.filter(user=request.user)
@@ -567,15 +481,15 @@ def index(request):
         if (emergency_list != []):
           context["emergency_list"] = emergency_list
 
+      form = forms.LinkPatientForm()
       if (request.method == "POST"): # Regular user trying to link its account with some existent patient
-        err, output = utils.ensure_params_presence(request.POST)
-        if not err:
+        err = 0
+        form = forms.LinkPatientForm(request.POST)
+        if (form.is_valid()):
           try:
-            patient = models.Patient.objects.get(dni=request.POST["patient dni"])
-            # print(f"patient linked to {patient.user}")
+            patient = models.Patient.objects.get(dni=form.cleaned_data["dni"])
             if (patient.user == None):
               patient.user = request.user
-              # print(f"linking patient to {request.user}")
               patient.save()
               context["patient_linked"] = 1
             elif (patient.user == request.user):
@@ -587,16 +501,17 @@ def index(request):
               output += "that account to see that patient's information."
           except models.Patient.DoesNotExist:
             err = 1
-            output = "No patient has been found with the dni provided."
+            output = "No patient has been found with dni '" + form.cleaned_data["dni"] + "'"
 
-    if err:
-      context["error_message"] = output
-      print(output)
+        if err:
+          context["error_message"] = output
+          print(output)
+
+      context["form"] = form
 
   return render(request, "sigfox_messages/index.html", context=context)
 
 
-@require_GET
 def patient_lookup(request):
 
   context = {}
@@ -605,6 +520,17 @@ def patient_lookup(request):
     patient_list = models.Patient.objects.all()
     if (patient_list.exists()):
       context["patient_list"] = patient_list
+
+    form = forms.PatientForm()
+    if (request.method == "POST"):
+      form = forms.PatientForm(request.POST)
+      if (form.is_valid()):
+        patient = form.save() # Add a new patient to Database
+        from sigfox_messages.bot import wait_emergency, manager
+        wait_emergency[patient.dni] = manager.Event()
+        return HttpResponseRedirect("/sigfox_messages/")
+
+    context["form"] = form
 
   return render(request, "sigfox_messages/patient_lookup.html", context=context)
 
@@ -688,73 +614,34 @@ def patient_detail(request, patient_id):
         (request.GET["unlink_acc"] == "true")):
       patient.user = None
       patient.save()
-      context["unlink"] = 1
-    elif (request.method == "POST" and request.user.is_staff):
-      perr = 0
-      params = ["doctor full name", "device id", "follow up"]
-      for p in params:
-        if (p not in request.POST):
-          perr = 1
-          break
-      
-      if perr:
-        context["form_err"] = 1
-      else:
-        invalid_field = 0
-        update = 0
-        if (request.POST["doctor full name"] != ""):
-          l = request.POST['doctor full name'].split()
-          dname = l[0]
-          dsurname = ' '.join(l[1:])
-          try: # Check out that doctor's presence
-            doctor = models.Doctor.objects.get(name=dname, surname=dsurname)
-            patient.doctor = doctor
-            update = 1
-          except models.Doctor.DoesNotExist:
-            invalid_field = 1
-            output = "Doctor with name '" + request.POST['doctor full name']
-            output += "' has not been found in our Database."
+      # context["unlink"] = 1
+      return HttpResponseRedirect("/sigfox_messages/")
 
-        if (request.POST["device id"] != ""):
-          try:
-            dev_conf = models.Device_Config.objects.get(dev_id=request.POST["device id"])
-            pat_qs = models.Patient.objects.filter(dev_conf=dev_conf)
-            if (pat_qs.exists()):
-              invalid_field = 1 # There's another patient linked to that device
-              output = "Device with identifier '" + request.POST["device id"]
-              output += "' is already in use."
-            else:
-              patient.dev_conf = dev_conf
-              update = 1
-          except models.Device_Config.DoesNotExist:
-            invalid_field = 1
-            output = "Device with device identifier '" + request.POST['device id']
-            output += "' has not been found in our Database."
-
-        follow_up = request.POST["follow up"]
-        if (follow_up != ""):
-          if ((follow_up == "critical") or (follow_up == "normal")):
-            patient.follow_up = follow_up
-            update = 1
+    if (request.user.is_staff):
+      form = forms.ModifyPatientForm()
+      if (request.method == "POST"): # Modify Patient fields
+        form = forms.ModifyPatientForm(request.POST)
+        if (form.is_valid()):
+          if ((form.cleaned_data["follow_up"] == "critical") or
+              (form.cleaned_data["follow_up"] == "normal")):
+            # All checkings passed, update patient fields
+            patient.follow_up = form.cleaned_data["follow_up"]
+            patient.dev_conf = form.cleaned_data["dev_conf"]
+            patient.doctor = form.cleaned_data["doctor"]
+            patient.save()
+            return HttpResponseRedirect("/sigfox_messages/")
           else:
-            invalid_field = 1
             output = "Supported values for follow-up are 'normal' or 'critical'"
+            print(output)
+            context["error_message"] = output
 
-        if invalid_field:
-          print(output)
-          context["error_message"] = output
-        if update:
-          print("Updating patient fields")
-          patient.save()
-          if not invalid_field: # All specified fields were successfully updated
-            context["patient_updated"] = 1
+      context["form"] = form
 
     context["patient"] = patient
 
   return render(request, "sigfox_messages/patient_detail.html", context=context)
 
 
-@require_GET
 def doctor_lookup(request):
 
   context = {}
@@ -764,6 +651,15 @@ def doctor_lookup(request):
     if (doctor_list.exists()):
       context["doctor_list"] = doctor_list
 
+    form = forms.DoctorForm()
+    if (request.method == "POST"):
+      form = forms.DoctorForm(request.POST)
+      if (form.is_valid()):
+        form.save() # Add a new doctor to Database
+        return HttpResponseRedirect("/sigfox_messages/")
+
+    context["form"] = form
+
   return render(request, "sigfox_messages/doctor_lookup.html", context=context)
 
 
@@ -771,13 +667,12 @@ def doctor_detail(request, doctor_id):
 
   datetime_obj = timezone.make_aware(datetime.now())
   context = {}
-
   if (request.user.is_authenticated):
     try:
       doctor = models.Doctor.objects.get(id=doctor_id)
       context["doctor"] = doctor
     except models.Doctor.DoesNotExist:
-      return render (request, "sigfox_messages/doctor_detail.html", context=context)
+      return render(request, "sigfox_messages/doctor_detail.html", context=context)
 
     if (request.user.is_staff):
       att_req_qs = models.Attention_request.objects.filter(doctor=doctor,
@@ -785,51 +680,55 @@ def doctor_detail(request, doctor_id):
       if (att_req_qs.exists()):
         context["att_req_qs"] = att_req_qs
 
-      if (request.method == "POST" and
-          "doctor state" in request.POST):
-        if (request.POST["doctor state"] == "busy" or
-            request.POST["doctor state"] == "available"):
-          doctor.state = request.POST["doctor state"]
-          doctor.save()
-          context["doctor_updated"] = 1
-        else:
-          context["wrong_state"] = request.POST["doctor state"]
-    elif (request.method == "POST" and
-          ("request priority" in request.POST) and
-          ("patient dni" in request.POST)):
-      if (request.POST["request priority"] == "Normal" or
-          request.POST["request priority"] == "Urgent"):
-        try:
-          invalid_patient = 0
-          patient = models.Patient.objects.get(dni=request.POST["patient dni"])
-          patient_qs = models.Patient.objects.filter(user=request.user)
-          if ((patient_qs.exists()) and
-              (patient in patient_qs)):
-            if (doctor.state == "available"):
-              att_req_qs = models.Attention_request.objects.filter(emergency=None,
-                                                                   patient=patient,
-                                                                   status="Unattended")
-              if (not att_req_qs.exists()):
-                models.Attention_request.objects.create(emergency=None,
-                                                        patient=patient,
-                                                        doctor=doctor,
-                                                        request_timestamp=datetime_obj,
-                                                        request_priority=request.POST["request priority"],
-                                                        status="Unattended")
-                context["att_req_created"] = 1
-              else:
-                context["already_assigned"] = 1
-            else:
-              context["not_available"] = 1
+      form = forms.DoctorStateForm()
+      if (request.method == "POST"):
+        form = forms.DoctorStateForm(request.POST)
+        if (form.is_valid()):
+          if (form.cleaned_data["state"] == "busy" or
+              form.cleaned_data["state"] == "available"):
+            doctor.state = form.cleaned_data["state"]
+            doctor.save()
+            return HttpResponseRedirect("/sigfox_messages/")
           else:
-            invalid_patient = 1
-        except models.Patient.DoesNotExist:
-          invalid_patient = 1
+            context["wrong_state"] = form.cleaned_data["state"]
+      context["form"] = form
+    elif (doctor.state == "available"):
+      context["available"] = 1
+      form = forms.Attention_requestForm()
+      if (request.method == "POST"):
+        form = forms.Attention_requestForm(request.POST)
+        if (form.is_valid()):
+          if (form.cleaned_data["request_priority"] == "Normal" or
+              form.cleaned_data["request_priority"] == "Urgent"):
+            try:
+              invalid_patient = 0
+              patient = models.Patient.objects.get(dni=form.cleaned_data["dni"])
+              patient_qs = models.Patient.objects.filter(user=request.user)
+              if (patient_qs.exists() and
+                  patient in patient_qs):
+                att_req_qs = models.Attention_request.objects.filter(emergency=None,
+                                                                     patient=patient,
+                                                                     status="Unattended")
+                if (not att_req_qs.exists()):
+                  models.Attention_request.objects.create(emergency=None,
+                                                          patient=patient,
+                                                          doctor=doctor,
+                                                          request_timestamp=datetime_obj,
+                                                          request_priority=form.cleaned_data["request_priority"],
+                                                          status="Unattended")
+                  return HttpResponseRedirect("/sigfox_messages/")
+                else:
+                  context["already_assigned"] = 1
+              else:
+                invalid_patient = 1
+            except models.Patient.DoesNotExist:
+              invalid_patient = 1
 
-        if invalid_patient:
-          context["invalid_patient"] = 1
-      else:
-        context["invalid_priority"] = 1
+            if invalid_patient:
+              context["invalid_patient"] = 1
+          else:
+            context["invalid_priority"] = 1
+      context["form"] = form
 
   return render (request, "sigfox_messages/doctor_detail.html", context=context)
 
@@ -852,7 +751,6 @@ def pdoctor_lookup(request, doctor_id):
   return render(request, "sigfox_messages/pdoctor_lookup.html", context=context)
 
 
-@require_GET
 def device_lookup(request):
 
   context = {}
@@ -861,6 +759,15 @@ def device_lookup(request):
     device_list = models.Device_Config.objects.all()
     if (device_list.exists()):
       context["device_list"] = device_list
+
+    form = forms.Device_ConfigForm()
+    if (request.method == "POST"):
+      form = forms.Device_ConfigForm(request.POST)
+      if (form.is_valid()):
+        form.save() # Add a new device to Database
+        return HttpResponseRedirect("/sigfox_messages/")
+
+    context["form"] = form
 
   return render(request, "sigfox_messages/device_lookup.html", context=context)
 
@@ -888,32 +795,21 @@ def device_config_detail(request, device_id):
     except models.Patient.DoesNotExist:
       context["failed_patient"] = 1
 
-    if (request.method == "POST" and request.user.is_staff):
-      d = dict(request.POST)
-      d.pop("csrfmiddlewaretoken")
-      update = 0
-      missing_field = 0
-      # print(d)
-      for attr in d:
-        if (hasattr(dev_conf, attr)):
-          if (d[attr] != ['']):
-            try:
-              value = int(d[attr][0])
-              setattr(dev_conf, attr, str(value))
-              update = 1
-            except ValueError:
-              missing_field = 1
-        else:
-          # print(f"attribute {attr} is not an attribute of a Device_Config object")
-          missing_field = 1
+    if (request.user.is_staff):
+      form = forms.ModifyDevice_ConfigForm()
+      if (request.method == "POST"):
+        form = forms.ModifyDevice_ConfigForm(request.POST)
+        if (form.is_valid()):
+          dev_conf.higher_bpm_limit = form.cleaned_data["higher_bpm_limit"]
+          dev_conf.lower_bpm_limit = form.cleaned_data["lower_bpm_limit"]
+          dev_conf.higher_ebpm_limit = form.cleaned_data["higher_ebpm_limit"]
+          dev_conf.lower_ebpm_limit = form.cleaned_data["lower_ebpm_limit"]
+          dev_conf.bpm_limit_window = form.cleaned_data["bpm_limit_window"]
+          dev_conf.min_delay = form.cleaned_data["min_delay"]
+          dev_conf.save()
+          return HttpResponseRedirect("/sigfox_messages/")
 
-      if missing_field: # Some fields could not be updated
-        context["missing_field"] = 1
-      if update:
-        print("Updating fields")
-        dev_conf.save()
-        if not missing_field: # All specified fields were successfully updated
-          context["device_updated"] = 1
+      context["form"] = form
 
   return render(request, "sigfox_messages/device_config_detail.html", context=context)
 
@@ -948,8 +844,8 @@ def biometrics_detail(request, biometrics_id):
       dev_hist = models.Device_History.objects.get(dev_conf=bio.patient.dev_conf,
                                                    date=bio.date)
       context["date"] = dev_hist.date
-      context["ranges"] = utils.get_ranges(int(dev_hist.lower_bpm_limit),
-                                           int(dev_hist.higher_bpm_limit),
+      context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
+                                           dev_hist.higher_bpm_limit,
                                            bio=bio)
   except models.Biometrics.DoesNotExist:
     print("Biometrics does not exist")
@@ -973,8 +869,8 @@ def biometrics24_detail(request, patient_id):
       context["last_day"] = 1
       dev_hist = models.Device_History.objects.filter(dev_conf=patient.dev_conf).latest("date")
       context["date"] = dev_hist.date
-      context["ranges"] = utils.get_ranges(int(dev_hist.lower_bpm_limit),
-                                           int(dev_hist.higher_bpm_limit),
+      context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
+                                           dev_hist.higher_bpm_limit,
                                            bio_24=bio_24)
   except models.Patient.DoesNotExist:
     print("Patient does not exist")
@@ -1005,8 +901,8 @@ def emergency_detail(request, emergency_id):
         context["epayload_qs"] = epayload_qs
       dev_hist = models.Device_History.objects.get(dev_conf=emergency.patient.dev_conf,
                                                    date=emergency.emerg_timestamp.date())
-      context["ranges"] = utils.get_ranges(int(dev_hist.lower_bpm_limit),
-                                           int(dev_hist.higher_bpm_limit),
+      context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
+                                           dev_hist.higher_bpm_limit,
                                            emergency=emergency)
   except models.Emergency_Biometrics.DoesNotExist:
     print("Emergency not found")
@@ -1029,8 +925,8 @@ def epayload_detail(request, epayload_id):
       context["epayload"] = epayload
       dev_hist = models.Device_History.objects.get(dev_conf=epayload.emergency.patient.dev_conf,
                                                    date=epayload.emergency.emerg_timestamp.date())
-      context["ranges"] = utils.get_ranges(int(dev_hist.lower_bpm_limit),
-                                           int(dev_hist.higher_bpm_limit),
+      context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
+                                           dev_hist.higher_bpm_limit,
                                            epayload=epayload)
   except models.Emergency_Payload.DoesNotExist:
     print("Epayload not found")

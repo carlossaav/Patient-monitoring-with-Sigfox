@@ -1,4 +1,5 @@
 {% if request.user.is_authenticated %}
+  <a href="{% url 'logout' %}?next={% url 'index' %}">Log out</a>
   {% if request.user.is_staff %}
     {% if device_list %}
       <p><strong>Below are the devices currently registered on the Monitoring System:</strong></p>
@@ -8,7 +9,17 @@
       {% endfor %}
       </ul>
     {% else %}
-      <h2>There are no devices currently registered in our system</h2>
+      <p><strong>There are no devices currently registered in our system</strong></p>
+    {% endif %}
+    {% if form %}
+      <h3>New Device</h3>
+      <form action="{% url 'device_lookup' %}" method="post">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <input type="submit" value="Submit" />
+      </form>
+      <p>*Bpm limit window = threshold in seconds exceeding a higher or lower bpm limit without triggering
+      an emergency condition</p>
     {% endif %}
   {% else %}
     <p>Only authorised users can see this information</p>

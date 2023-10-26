@@ -1,19 +1,20 @@
 {% if request.user.is_authenticated %}
   Hi {{ request.user.username}} <BR>
   <a href="{% url 'logout' %}?next={{request.path}}">Log out</a>
+  <h1>Patient Monitoring System</h1>
   {% if error_message %}
     <p><strong>{{ error_message }}</strong></p>
   {% endif %}
 
   {% if emergency_list %}
-    <h3>Below are currently active emergencies that may require your attention:</h3>
+    <p><strong>Below are currently active emergencies that may require your attention:</p></strong>
     {% for ebio in emergency_list %}
       <li><a href="{% url 'emergency_detail' ebio.id %}">{{ ebio.emerg_timestamp }}: 
       {{ ebio.patient }}
       </a></li>
     {% endfor %}
   {% else %}
-    <h3>There are no emergencies currently active.</h3>
+    <p><strong>There are no emergencies currently active.</p></strong>
   {% endif %}
 
   {% if request.user.is_staff %}
@@ -21,71 +22,6 @@
     <li><a href="{% url 'doctor_lookup' %}">Query Doctor's database</a></li>
     <li><a href="{% url 'patient_lookup' %}">Query Patient's database</a></li>
     <li><a href="{% url 'device_lookup' %}">Query Device's database</a></li>
-
-    {% if doctor_registered %}
-      <p><strong>The doctor has been succesfully registered.</strong></p>
-    {% endif %}
-
-    {% if patient_registered %}
-      <p><strong>The patient has been succesfully registered.</strong></p>
-    {% endif %}
-
-    {% if device_registered %}
-      <p><strong>The device has been succesfully registered.</strong></p>
-    {% endif %}
-
-    <h1> New doctor </h1>
-    <form action="{% url 'index' %}" method="post">
-    {% csrf_token %}
-    <label>Name:</label>
-    <input type="textfield" name="doctor name"/><BR>
-    <label>Surname:</a>
-    <input type="textfield" name="doctor surname"/><BR>
-    <label>State:</a>
-    <input type="textfield" name="doctor state"/><BR>
-    <input type="submit" value="Submit" />
-    </form>
-
-    <h1> New patient </h1>
-    <form action="{% url 'index' %}" method="post">
-    {% csrf_token %}
-    <label>Patient's dni:</label>
-    <input type="textfield" name="patient dni"/><BR>
-    <label>Patient's name:</a>
-    <input type="textfield" name="patient name"/><BR>
-    <label>Patient's surname:</a>
-    <input type="textfield" name="patient surname"/><BR>
-    <label>Patient's age:</a>
-    <input type="textfield" name="patient age"/><BR>
-    <label>Patient's doctor (complete name):</a>
-    <input type="textfield" name="patient doctor"/><BR>
-    <label>Patient's device id:</a>
-    <input type="textfield" name="patient device id"/><BR>
-    <label>Patient's follow-up:</a>
-    <input type="textfield" name="patient follow-up"/><BR>
-    <input type="submit" value="Submit" />
-    </form>
-
-    <h1> New device </h1>
-    <form action="{% url 'index' %}" method="post">
-    {% csrf_token %}
-    <label>Device identifier:</label>
-    <input type="textfield" name="dev id"/><BR>
-    <label>Higher bpm limit:</a>
-    <input type="textfield" name="higher bpm limit"/><BR>
-    <label>Lower bpm limit:</a>
-    <input type="textfield" name="lower bpm limit"/><BR>
-    <label>Higher emergency bpm limit:</a>
-    <input type="textfield" name="higher ebpm limit"/><BR>
-    <label>Lower emergency bpm limit:</a>
-    <input type="textfield" name="lower ebpm limit"/><BR>
-    <label>Bpm limit window (threshold in sec)*:</a>
-    <input type="textfield" name="bpm limit window"/><BR>
-    <label>Minimal delay between bpm extremes:</a>
-    <input type="textfield" name="min delay"/><BR>
-    <input type="submit" value="Submit" />
-    </form>
-    <p> *Bpm limit window = threshold in seconds exceeding a higher or lower bpm limit without triggering an emergency condition</p>
   {% else %}
     {% if doctors_list %}
       <p>The following doctors are currently available to be requested:</p>
@@ -111,14 +47,15 @@
       <p> This account has not yet been configured to follow up any patient.</p>
     {% endif %}
 
-    <p>If you want to add a new patient to your monitoring list, please provide the 'dni'
-    of the patient you'd wish to follow up:</p>
-    <form action="{% url 'index' %}" method="post">
-    {% csrf_token %}
-    <label>Patient's dni:</a>
-    <input type="textfield" name="patient dni"/><BR>
-    <input type="submit" value="Submit" />
-    </form>
+    {% if form %}
+      <p>If you want to add a new patient to your monitoring list, please provide the 'dni'
+      of the patient you'd wish to follow up:</p>
+      <form action="{% url 'index' %}" method="post">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <input type="submit" value="Submit" />
+      </form>
+    {% endif %}
     {% if patient_linked %}
       <p><strong>The patient has been succesfully linked to this account.</strong></p>
     {% endif %}

@@ -1,15 +1,16 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 class Device_Config(models.Model):
 
-  dev_id = models.CharField(max_length=50, primary_key=True)
-  higher_bpm_limit = models.CharField(max_length=3)
-  lower_bpm_limit = models.CharField(max_length=3)
-  higher_ebpm_limit = models.CharField(max_length=3)
-  lower_ebpm_limit = models.CharField(max_length=3)
-  bpm_limit_window = models.CharField(max_length=4)
-  min_delay = models.CharField(max_length=4)
+  dev_id = models.CharField(max_length=15, primary_key=True)
+  higher_bpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
+  lower_bpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
+  higher_ebpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
+  lower_ebpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
+  bpm_limit_window = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(127)])
+  min_delay = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(65535)])
 
   def __str__(self):
     return self.dev_id
@@ -24,10 +25,10 @@ class Device_History(models.Model):
   last_dev_state = models.CharField(max_length=25)
   last_known_latitude = models.CharField(max_length=25)
   last_known_longitude = models.CharField(max_length=25)
-  uplink_count = models.CharField(max_length=3)
-  downlink_count = models.CharField(max_length=3)
-  higher_bpm_limit = models.CharField(max_length=3)
-  lower_bpm_limit = models.CharField(max_length=3)
+  uplink_count = models.IntegerField()
+  downlink_count = models.IntegerField()
+  higher_bpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
+  lower_bpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
 
   def __str__(self):
     return str(self.dev_conf) + str(self.date)
@@ -37,7 +38,6 @@ class Doctor(models.Model):
 
   name = models.CharField(max_length=25)
   surname = models.CharField(max_length=50)
-  # dni = models.CharField(max_length=25)
   state = models.CharField(max_length=25)
 
   def __str__(self):
@@ -46,13 +46,13 @@ class Doctor(models.Model):
 
 class Patient(models.Model):
 
-  dni = models.CharField(max_length=25, primary_key=True)
+  dni = models.CharField(max_length=10, primary_key=True)
   name = models.CharField(max_length=25)
   surname = models.CharField(max_length=50)
   user = models.ForeignKey(User, on_delete=models.SET_NULL, blank=True, null=True)
   age = models.CharField(max_length=3)
-  dev_conf = models.OneToOneField(Device_Config, on_delete=models.SET_NULL, blank=True, null=True)
-  doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, blank=True, null=True)
+  dev_conf = models.OneToOneField(Device_Config, on_delete=models.SET_NULL, null=True)
+  doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, null=True)
   follow_up = models.CharField(max_length=25)
 
   def __str__(self):
@@ -85,7 +85,7 @@ class Emergency_Biometrics(models.Model):
 
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
   emerg_timestamp = models.DateTimeField()
-  emsg_count = models.CharField(max_length=2)
+  emsg_count = models.IntegerField()
   active = models.CharField(max_length=5)
 
   bpm_time = models.CharField(max_length=50)
@@ -149,7 +149,7 @@ class Attention_request(models.Model):
 
   emergency = models.OneToOneField(Emergency_Biometrics, on_delete=models.SET_NULL, blank=True, null=True)
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-  doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, blank=True, null=True)
+  doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, null=True)
 
   request_timestamp = models.DateTimeField()
   request_priority = models.CharField(max_length=25) # ("Normal"/"Urgent")

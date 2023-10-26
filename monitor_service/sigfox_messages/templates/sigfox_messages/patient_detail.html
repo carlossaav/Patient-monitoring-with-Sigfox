@@ -1,4 +1,5 @@
 {% if request.user.is_authenticated %}
+  <a href="{% url 'logout' %}?next={% url 'index' %}">Log out</a>
   {% if not_allowed %}
     <p><strong>You're not allowed to see this information.</strong></p>
   {% else %}
@@ -111,39 +112,22 @@
       {% endif %}
 
       {% if request.user.is_staff %}
-        <p><strong>If you wish to modify current patient's information, please fill in the desired
-        fields below:</strong></p>
-        <form action="{% url 'patient_detail' patient.dni %}" method="post">
-        {% csrf_token %}
-        <label>New linked device (identifier):</a>
-        <input type="textfield" name="device id"/><BR>
-        <label>New Doctor's full name:</a>
-        <input type="textfield" name="doctor full name"/><BR>
-        <label>New follow-up:</a>
-        <input type="textfield" name="follow up"/><BR>
-        <BR>
-        <input type="submit" value="Modify patient info" /><BR>
-        </form>
-        {% if form_err %}
-          <p><strong>Some errors happened during form processing.</strong></p>
-        {% else %}
-          {% if patient_updated %}
-            <p><strong>All specified fields were successfully updated.</strong></p>
-          {% else %}
-            {% if error_message %}
-              <p><strong>{{ error_message }}</strong></p>
-            {% endif %}
+        {% if form %}
+          <p><strong>If you wish to modify current patient's information, please fill in the desired
+          fields below:</strong></p>
+          <form action="{% url 'patient_detail' patient.dni %}" method="post">
+          {% csrf_token %}
+          {{ form.as_p }}
+          <input type="submit" value="Modify patient info" />
+          </form>
+          {% if error_message %}
+            <p><strong>**{{ error_message }}**</strong></p>
           {% endif %}
         {% endif %}
-        <BR>
       {% endif %}
       <p>*If you want to stop following this patient on your account, and start monitoring it <BR>on another
       you have access to, please click on the following link and then relate <BR>the patient on the newer one*:
       <a href="{% url 'patient_detail' patient.dni %}?unlink_acc=true">Unlink patient</a></p>
-      {% if unlink %}
-        <p><strong>Patient '{{ patient.name }} {{ patient.surname }}' removed from your
-        account</strong></p>
-      {% endif %}
     {% else %}
       {% if patient_id %}
         <p><strong>Patient with dni '{{ patient_id }}' not found</strong></p>
@@ -152,5 +136,6 @@
   {% endif %}
   <a href="{% url 'index' %}">Back to main portal</a></p>
 {% else %}
-  <a href="{% url 'login' %}?next={{request.path}}">Log in to see this page</a>
+  <p>Log in to see this page</p>
+  <a href="{% url 'login' %}?next={{request.path}}">Log in</a>
 {% endif %}
