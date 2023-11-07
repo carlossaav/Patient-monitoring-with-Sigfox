@@ -29,6 +29,7 @@ class Device_History(models.Model):
   downlink_count = models.IntegerField()
   higher_bpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
   lower_bpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
+  continuous_delivery = models.BooleanField(default=True)
 
   def __str__(self):
     return str(self.dev_conf) + str(self.date)
@@ -84,21 +85,22 @@ class Patient_Contact(models.Model):
 class Emergency_Biometrics(models.Model):
 
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-  emerg_timestamp = models.DateTimeField()
+  spawn_timestamp = models.DateTimeField()
+  termination_timestamp = models.DateTimeField(null=True)
   emsg_count = models.IntegerField()
-  active = models.CharField(max_length=5)
+  active = models.BooleanField()
 
-  bpm_time = models.CharField(max_length=50)
-  ibi_time = models.CharField(max_length=50)
+  bpm_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  ibi_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
 
-  avg_bpm = models.CharField(max_length=3)
-  sum_bpm = models.CharField(max_length=25)
-  avg_ibi = models.CharField(max_length=5)
-  sum_ibi = models.CharField(max_length=25)
-  max_bpm = models.CharField(max_length=3)
-  max_ibi = models.CharField(max_length=5)
-  min_bpm = models.CharField(max_length=3)
-  min_ibi = models.CharField(max_length=5)
+  avg_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  sum_bpm = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  avg_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  sum_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  max_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  max_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  min_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  min_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
 
   lower_range = models.CharField(max_length=5)
   lower_range_sum = models.CharField(max_length=25)
@@ -116,7 +118,7 @@ class Emergency_Biometrics(models.Model):
   min_temp = models.CharField(max_length=6)
   
   def __str__(self):
-    return str(self.emerg_timestamp)
+    return str(self.spawn_timestamp)
 
 
 class Emergency_Payload(models.Model):
@@ -126,12 +128,12 @@ class Emergency_Payload(models.Model):
   msg_type = models.CharField(max_length=25)
   payload_format = models.CharField(max_length=1)
 
-  avg_bpm = models.CharField(max_length=3)
-  avg_ibi = models.CharField(max_length=5)
-  max_bpm = models.CharField(max_length=3)
-  max_ibi = models.CharField(max_length=5)
-  min_bpm = models.CharField(max_length=3)
-  min_ibi = models.CharField(max_length=5)
+  avg_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  avg_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  max_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  max_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  min_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  min_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
 
   lower_range = models.CharField(max_length=5)
   second_range = models.CharField(max_length=5)
@@ -165,12 +167,12 @@ class Biometrics(models.Model):
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
   date = models.DateField()
 
-  avg_bpm = models.CharField(max_length=3)
-  avg_ibi = models.CharField(max_length=5)
-  max_bpm = models.CharField(max_length=3)
-  max_ibi = models.CharField(max_length=5)
-  min_bpm = models.CharField(max_length=3)
-  min_ibi = models.CharField(max_length=5)
+  avg_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  avg_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  max_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  max_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  min_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  min_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
 
   lower_range = models.CharField(max_length=5)
   second_range = models.CharField(max_length=5)
@@ -196,17 +198,17 @@ class Biometrics(models.Model):
 class Biometrics_24(models.Model):
 
   patient = models.OneToOneField(Patient, on_delete=models.CASCADE, primary_key=True)
-  bpm_time = models.CharField(max_length=50)
-  ibi_time = models.CharField(max_length=50)
+  bpm_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  ibi_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
 
-  avg_bpm = models.CharField(max_length=3)
-  sum_bpm = models.CharField(max_length=25)
-  avg_ibi = models.CharField(max_length=5)
-  sum_ibi = models.CharField(max_length=25)
-  max_bpm = models.CharField(max_length=3)
-  max_ibi = models.CharField(max_length=5)
-  min_bpm = models.CharField(max_length=3)
-  min_ibi = models.CharField(max_length=5)
+  avg_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  sum_bpm = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  avg_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  sum_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  max_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  max_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  min_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  min_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
 
   lower_range = models.CharField(max_length=5)
   lower_range_sum = models.CharField(max_length=25)

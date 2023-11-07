@@ -1,0 +1,20 @@
+{% extends 'base_templates/base.html' %}
+
+{% block content %}
+  {% if request.user.is_staff %}
+    {% if form %}
+      <div class="mt-2">
+        <h4 class="mb-3">New Patient</h4>
+        <form action="{% url 'add_patient' %}" method="post">
+          {% csrf_token %}
+          <strong>{{ form.as_p }}<strong>
+          <input type="submit" class="btn btn-primary" value="Submit"/>
+        </form>
+      </div>
+    {% else %}
+      <p class="alert alert-warning mt-3">Some error happened.</p>
+    {% endif %}
+  {% else %}
+    <p class="alert alert-danger mt-3">Only authorised users can see this information</p>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends 'base_templates/base.html' %}
+
+{% block content %}
+  {% if request.user.is_staff %}
+    {% if id_not_found %}
+      <p class="alert alert-warning">Device with identifier '{{ id_not_found }}' wasn't found</p>
+    {% else %}
+      {% if form %}
+        <div class="alert alert-info mt-2">
+          <h5>If you wish to modify one or more emergency detection parameters on the device, 
+          please fill in the fields below:</h5>
+        </div>
+        <form action="{% url 'modify_device_config' dev_conf.dev_id %}" method="post">
+          {% csrf_token %}
+          <strong>{{ form.as_p }}<strong>
+          <input type="submit" value="Submit" class="btn btn-primary" />
+        </form>
+        </div>
+      {% else %}
+        <p class="alert alert-warning mt-3">Some error happened.</p>
+      {% endif %}
+    {% endif %}
+  {% else %}
+    <p class="alert alert-danger mt-3">Only authorised users can see this information</p>
+  {% endif %}
+{% endblock %}

@@ -1,31 +1,23 @@
-{% if request.user.is_authenticated %}
-  <a href="{% url 'logout' %}?next={% url 'index' %}">Log out</a>
+{% extends 'base_templates/base.html' %}
+
+{% block content %}
   {% if request.user.is_staff %}
     {% if device_list %}
-      <p><strong>Below are the devices currently registered on the Monitoring System:</strong></p>
-      <ul>
-      {% for device in device_list %}
-        <li><a href="{% url 'device_config_detail' device %}">{{ device }}</a></li>
-      {% endfor %}
+      <h4 class="alert alert-info mt-2">Below are the devices currently registered on the Monitoring System:</h4>
+      <ul class="list-group mt-3">
+        {% for device in device_list %}
+          <li class="list-group-item"><a href="{% url 'device_config_detail' device %}">{{ device }}</a></li>
+        {% endfor %}
       </ul>
     {% else %}
-      <p><strong>There are no devices currently registered in our system</strong></p>
+      <div class="alert alert-warning mt-3">
+        <p><strong>There are no devices currently registered in our system</strong></p>
+      </div>
     {% endif %}
-    {% if form %}
-      <h3>New Device</h3>
-      <form action="{% url 'device_lookup' %}" method="post">
-      {% csrf_token %}
-      {{ form.as_p }}
-      <input type="submit" value="Submit" />
-      </form>
-      <p>*Bpm limit window = threshold in seconds exceeding a higher or lower bpm limit without triggering
-      an emergency condition</p>
-    {% endif %}
+    <a href="{% url 'add_device' %}" class="btn btn-primary mt-3">Add a new Device to Database</a><BR>
   {% else %}
-    <p>Only authorised users can see this information</p>
+    <div class="alert alert-danger mt-3">
+      <p><strong>Only authorized users can see this information</strong></p>
+    </div>
   {% endif %}
-  <a href="{% url 'index' %}">Back to main portal</a></p>
-{% else %}
-  <p>Log in as an authorised user to see this page</p>
-  <a href="{% url 'login' %}?next={{request.path}}">Log in</a>
-{% endif %}
+{% endblock %}

@@ -18,17 +18,17 @@ SMS_DELAY = 20
 # Introduce seconds delay between calls to send_message()
 MESSAGE_DELAY = 2
 
-# Specify the wait in seconds for a notifier process to leave loop
-NOTIFIER_WAIT = 30
-
 # Specify the notification period in seconds for chats
 NOTIFICATION_PERIOD = 25
+
+# Specify the wait in seconds for a notifier process to leave notification loop
+NOTIFIER_WAIT = 30
 
 # Specify the maximum notification time, in minutes, while the notification process
 # is active without acknowledgement for both Telegram and SMS contact systems
 MAX_NOTIFICATION_TIME = 120
 
-# Service url
+# Service url, only used for displaying the service url on Telegram notifications.
 SERVICE_URL = "http://ec2-18-188-48-139.us-east-2.compute.amazonaws.com:8000/sigfox_messages"
 
 # Msg types 

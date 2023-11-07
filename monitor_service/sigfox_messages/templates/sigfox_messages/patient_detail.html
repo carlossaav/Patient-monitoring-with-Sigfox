@@ -1,141 +1,141 @@
-{% if request.user.is_authenticated %}
-  <a href="{% url 'logout' %}?next={% url 'index' %}">Log out</a>
+{% extends 'base_templates/base.html' %}
+
+{% block content %}
   {% if not_allowed %}
-    <p><strong>You're not allowed to see this information.</strong></p>
+    <div class="alert alert-danger">
+      <p>You're not allowed to see this information.</p>
+    </div>
   {% else %}
     {% if patient %}
-      <h2>Information from patient linked to '{{ patient.user }}' account:</h2>
-      <ul>
-      <li>Dni: {{ patient.dni }}</li>
-      <li>Name: {{ patient.name }}</li>
-      <li>Surname: {{ patient.surname }}</li>
-      <li>Linked Device: <a href="{% url 'device_config_detail' patient.dev_conf %}">
-      {{ patient.dev_conf }}</a></li>
-      <li>Doctor's full name: <a href="{% url 'doctor_detail' patient.doctor.id %}">
-      {{ patient.doctor }}</a></li>
-      <li>Age: {{ patient.age }}</li>
-      <li>Follow_up: {{ patient.follow_up }}</li>
-      {% if phone_numbers %}
-        <li>Emergency phone numbers:</li>
-        <ul>
-        {% for number in phone_numbers %}
-          <li>{{ number }}</li>
-        {% endfor %}
-        </ul>
-      {% else %}
-        <li>There are no emergency numbers linked to this patient yet</li>
-      {% endif %}
+      <div class="alert alert-info">
+        <h4>Information from patient linked to '{{ patient.user }}' account:</h4>
+      </div>
+      <ul class="list-group mt-3">
+        <li class="list-group-item"><strong>Dni:</strong> {{ patient.dni }}</li>
+        <li class="list-group-item"><strong>Name:</strong> {{ patient.name }}</li>
+        <li class="list-group-item"><strong>Surname:</strong> {{ patient.surname }}</li>
+        <li class="list-group-item"><strong>Linked Device:</strong> 
+        <a href="{% url 'device_config_detail' patient.dev_conf %}">{{ patient.dev_conf }}</a></li>
+        <li class="list-group-item"><strong>Doctor's full name:</strong> 
+        <a href="{% url 'doctor_detail' patient.doctor.id %}">{{ patient.doctor }}</a></li>
+        <li class="list-group-item"><strong>Age:</strong> {{ patient.age }}</li>
+        <li class="list-group-item"><strong>Follow_up:</strong> {{ patient.follow_up }}</li>
+        {% if phone_numbers %}
+          <li class="list-group-item"><strong>Emergency phone numbers:</strong>
+            <ul class="list-group mt-1">
+              {% for number in phone_numbers %}
+                <li class="list-group-item">{{ number }}</li>
+              {% endfor %}
+            </ul>
+          </li>
+        {% else %}
+          <li class="list-group-item"><strong>No emergency number was linked to this patient yet</strong></li>
+        {% endif %}
       </ul>
 
+      {% if request.user.is_staff %}
+        <a href="{% url 'modify_patient' patient.dni %}" class="btn btn-primary mt-3 mb-2">Modify patient info</a>
+      {% endif %}
+
       {% if ongoing_emergency %}
-        <h3>There's an emergency currently active from this patient:
-        <a href="{% url 'emergency_detail' ongoing_emergency.id %}">
-        <strong>See emergency measures</a></strong></h3>
+        <div class="alert alert-danger mt-3">
+          <h4>There's an emergency currently active from this patient:
+          <a href="{% url 'emergency_detail' ongoing_emergency.id %}">See emergency measures</a></h4>
+        </div>
         {% if attended %}
-          <p><strong>**The ongoing emergency has already been acknowledged by our medical team**.
-          </strong></p>
+          <div class="alert alert-success mt-3">
+            <p><strong>The ongoing emergency has already been acknowledged by our medical team.</strong></p>
+          </div>
         {% else %}
           {% if not_attended %}
-            <p><strong>**</strong>If you want to quickly set the current emergency as "Attended" 
-            so every configured number<BR>stops receiving the emergency notification, 
-            click on the following link<strong>**</strong>:
-            <a href="{% url 'patient_detail' patient.dni %}?emergency_attended=true">
-            Set emergency as Attended</a></p>
+            <div class="alert alert-warning mt-3">
+              <p><strong>If you want to quickly set the current emergency as "Attended" so every configured number 
+              stops receiving the emergency notifications, click the button below:</strong></p>
+            </div>
+            <a href="{% url 'patient_detail' patient.dni %}?emergency_attended=true" class="btn btn-primary mb-2">
+            Set emergency as Attended</a>
           {% endif %}
         {% endif %}
       {% else %}
         {% if not_attended %}
-          <p><strong>**One emergency has taken place not long ago**</strong>
-          If you want to quickly set the last emergency as "Attended" <BR> so every configured number
-          stops receiving the emergency notification, click on the following link:<BR>
-          <a href="{% url 'patient_detail' patient.dni %}?emergency_attended=true"> Set emergency 
-          as Attended</a></p>
+          <div class="alert alert-warning mt-3">
+            <p><strong>**Last emergency is still unattended**</strong> If you want to quickly set the 
+            last emergency as "Attended" so every configured number stops receiving the emergency notifications, 
+            click on the following link:<a href="{% url 'patient_detail' patient.dni %}?emergency_attended=true"> 
+            Set emergency as Attended</a></p>
+          </div>
         {% else %}
           {% if attended_set %}
-            <p><strong>**Alert systems stopped**</strong></p>
+            <p class="alert alert-success mt-3"><strong>**Alert systems stopped**</strong></p>
           {% endif %}
         {% endif %}
       {% endif %}
+
       {% if bio_24 %}
-        <p>Check out last daily-based recorded measures gathered from the device: 
+        <p class="alert alert-info mt-3"><strong>Check out last daily-based recorded measures gathered from the device:</strong> 
         <a href="{% url 'biometrics24_detail' bio_24.patient %}">Day-based biometrics</a></p>
       {% else %}
-        <p><strong>Today's biometrics are not available.</strong></p>
+        <p class="alert alert-warning mt-3"><strong>Last daily based biometrics are not available.</strong></p>
       {% endif %}
 
       {% if emergency_list %}
-        <p>Check out patient's historical biometrics on emergencies:</p>
-        <ul>
+        <p class="alert alert-info mt-4"><strong>Check out patient's historical biometrics on emergencies:</strong></p>
+        <ul class="list-group mt-3">
         {% for ebio in emergency_list %}
-          <li><a href="{% url 'emergency_detail' ebio.id %}">{{ ebio.emerg_timestamp }}</a></li>
+          <li class="list-group-item"><a href="{% url 'emergency_detail' ebio.id %}">{{ ebio.spawn_timestamp }}</a></li>
         {% endfor %}
         </ul>
       {% else %}
-        <p><strong>There are no historical records of emergencies available for this patient.</strong></p>
+        <p class="alert alert-warning mt-4"><strong>There are no historical records of emergencies available for this patient.
+        </strong></p>
       {% endif %}
 
       {% if bio_list %}
-        <p>Check out patient's biometric history:</p>
-        <ul>
+        <p class="alert alert-info mt-4"><strong>Check out patient's biometric history:</strong></p>
+        <ul class="list-group mt-3">
         {% for bio in bio_list %}
-          <li><a href="{% url 'biometrics_detail' bio.id %}">{{ bio.date }}</a></li>
+          <li class="list-group-item"><a href="{% url 'biometrics_detail' bio.id %}">{{ bio.date }}</a></li>
         {% endfor %}
         </ul>
       {% else %}
-        <p><strong>There are no historical biometrics records available for this patient.</strong></p>
+        <p class="alert alert-warning mt-4"><strong>There are no historical biometrics records available for this patient.
+        </strong></p>
       {% endif %}
 
       {% if empty_att_req %}
-        <p><strong>The patient has never requested our medical team.</strong></p>
+        <p class="alert alert-info mt-4">The patient has never requested our medical team.</p>
       {% else %}
         {% if auto_att_req %}
-          <p>The following attention requests were <strong>automatically generated</strong> for patient 
-          '{{ patient.name }} {{ patient.surname }}',<strong><BR>due to the detection of emergency conditions:
-          </strong></p>
-          <ul>
+          <p class="mt-4"><strong>The following attention requests were automatically generated for patient 
+          '{{ patient.name }} {{ patient.surname }}', due to the detection of emergency conditions:</strong></p>
+          <ul class="list-group mt-3">
           {% for att_req in auto_att_req %}
-            <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.request_timestamp }}
+            <li class="list-group-item"><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.request_timestamp }}
             </a></li>
           {% endfor %}
           </ul>
         {% endif %}
 
         {% if manual_att_req %}
-          <p>The following attention requests were <strong>manually registered</strong>:</p>
-          <ul>
+          <p class="mt-3"><strong>The following attention requests were manually registered</strong>:</p>
+          <ul class="list-group mt-3">
           {% for att_req in manual_att_req %}
-            <li><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.request_timestamp }}
+            <li class="list-group-item"><a href="{% url 'att_req_detail' att_req.id %}">{{ att_req.request_timestamp }}
             </a></li>
           {% endfor %}
           </ul>
         {% endif %}
       {% endif %}
 
-      {% if request.user.is_staff %}
-        {% if form %}
-          <p><strong>If you wish to modify current patient's information, please fill in the desired
-          fields below:</strong></p>
-          <form action="{% url 'patient_detail' patient.dni %}" method="post">
-          {% csrf_token %}
-          {{ form.as_p }}
-          <input type="submit" value="Modify patient info" />
-          </form>
-          {% if error_message %}
-            <p><strong>**{{ error_message }}**</strong></p>
-          {% endif %}
-        {% endif %}
-      {% endif %}
-      <p>*If you want to stop following this patient on your account, and start monitoring it <BR>on another
-      you have access to, please click on the following link and then relate <BR>the patient on the newer one*:
-      <a href="{% url 'patient_detail' patient.dni %}?unlink_acc=true">Unlink patient</a></p>
+      <div class="alert alert-info mt-3">
+        <p>*If you want to stop following this patient on your account, and start monitoring it on another
+        you have access to, please click on the following link and then relate the patient on the newer one*:
+        <strong><a href="{% url 'patient_detail' patient.dni %}?unlink_acc=true">Unlink patient</a></strong></p>
+      </div>
     {% else %}
       {% if patient_id %}
-        <p><strong>Patient with dni '{{ patient_id }}' not found</strong></p>
+        <p class="alert alert-warning">Patient with dni '{{ patient_id }}' not found</p>
       {% endif %}
     {% endif %}
   {% endif %}
-  <a href="{% url 'index' %}">Back to main portal</a></p>
-{% else %}
-  <p>Log in to see this page</p>
-  <a href="{% url 'login' %}?next={{request.path}}">Log in</a>
-{% endif %}
+{% endblock %}

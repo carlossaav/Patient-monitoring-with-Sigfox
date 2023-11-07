@@ -67,7 +67,6 @@ async def send_message(async_lock, echat_id, text):
   return msg_sent, diff
 
 
-
 async def send_location(async_lock, echat_id, latitude, longitude):
 
   from sigfox_messages.bot import bot, last_location_lock, last_location
@@ -207,11 +206,13 @@ def get_ranges(lower_bpm_limit, higher_bpm_limit, **kwargs):
 
 def check_emergency_deactivation(emergency, datetime_obj):
 
-  seconds = get_sec_diff(datetime_obj, emergency.emerg_timestamp)
+  seconds = get_sec_diff(datetime_obj, emergency.spawn_timestamp)
   if (seconds > constants.NEW_EMERG_DELAY):
     print("Deactivating emergency", end=' ', flush=True)
     print(emergency, flush=True)
-    emergency.active = "No" # Deactivate emergency
+    emergency.active = False  # Deactivate emergency
+    emergency.termination_timestamp = models.Device_History.objects.filter(dev_conf=emergency.patient.dev_conf).\
+                                      latest("date").last_msg_time
     emergency.save()
 
   return emergency
@@ -254,7 +255,7 @@ def check_emergency_deletion(days=constants.KEEP_RECORDS):
   datetime_obj = timezone.make_aware(datetime.now())
   key_datetime_obj = datetime_obj - timedelta(days=days)
 
-  for emergency in models.Emergency_Biometrics.objects.filter(emerg_timestamp__lt=key_datetime_obj):
+  for emergency in models.Emergency_Biometrics.objects.filter(spawn_timestamp__lt=key_datetime_obj):
     qs = models.Emergency_Payload.objects.filter(emergency=emergency)
     if (qs.exists()):
       qs.delete()
@@ -264,6 +265,11 @@ def check_emergency_deletion(days=constants.KEEP_RECORDS):
     except models.Attention_request.DoesNotExist:
       pass
     emergency.delete()
+
+  # Erase also old 'manual' attention requests
+  qs = models.Attention_request.objects.filter(request_timestamp__lt=key_datetime_obj)
+  if (qs.exists()):
+    qs.delete()
 
 
 # Erase all Device_History older than 'days' days
@@ -280,7 +286,7 @@ def check_device_history_deletion(days=constants.KEEP_RECORDS):
 # Erases all records older than 'days' days
 def check_old_records(days=constants.KEEP_RECORDS):
   # This function is meant to be used by a separate process.
-  # It gets executed once a day, perform its necessary checkings
+  # It gets executed once a day, performs its necessary checkings
   # over Database models, and goes to sleep again, for 24 hours,
   # until next execution. It runs over and over and over concurrently
   # with the Monitor Service and the Telegram Bot.
@@ -291,6 +297,31 @@ def check_old_records(days=constants.KEEP_RECORDS):
     check_emergency_deletion(days=days)
     print("Checking done. Sleeping 24 hours until next checking..", flush=True)
     time.sleep(24*60*60)
+
+
+def get_interval(delta):
+
+  time = ""
+  seconds = (delta.seconds % 60)
+  mins = int(delta.seconds // 60)
+  if (mins >= 60):
+    hours = int(mins//60)
+    mins %= 60
+    if (hours < 10):
+      time += "0"
+    time += str(hours) + ":"
+  else:
+    time += "00:"
+  
+  if (mins < 10):
+    time += "0"
+  time += str(mins) + ":"
+
+  if (seconds < 10):
+    time += "0"
+  time += str(seconds)
+
+  return time
 
 
 # Substract one day to the given date
@@ -381,14 +412,14 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
     date = datetime_obj.date()
 
   if ((msg_count > 1) and (getattr(bio, attr) != "")):
-    if ((attr == "max_bpm") and (attr_value > int(bio.max_bpm))):
-      bio.max_bpm = str(attr_value)
-    elif ((attr == "min_bpm") and (attr_value < int(bio.min_bpm))):
-      bio.min_bpm = str(attr_value)
-    elif ((attr == "max_ibi") and (attr_value > int(bio.max_ibi))):
-      bio.max_ibi = str(attr_value)
-    elif ((attr == "min_ibi") and (attr_value < int(bio.min_ibi))):
-      bio.min_ibi = str(attr_value)
+    if ((attr == "max_bpm") and (attr_value > bio.max_bpm)):
+      bio.max_bpm = attr_value
+    elif ((attr == "min_bpm") and (attr_value < bio.min_bpm)):
+      bio.min_bpm = attr_value
+    elif ((attr == "max_ibi") and (attr_value > bio.max_ibi)):
+      bio.max_ibi = attr_value
+    elif ((attr == "min_ibi") and (attr_value < bio.min_ibi)):
+      bio.min_ibi = attr_value
     elif ((attr == "avg_bpm") or (attr == "avg_ibi")):
 
       if ((ebio != None) and (dev_hist.uplink_count==1)):
@@ -401,7 +432,6 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
           return # This should never happen. Catch exception if it does, to continue.
 
       seconds = get_sec_diff(datetime_obj, dev_hist.last_msg_time)
-      # print(f"(uplink) seconds = {seconds}")
       if (seconds <= constants.MAX_TIME_DELAY):
         sum_field = "sum_" + attr[4:]
         time_field = attr[4:] + "_time"
@@ -411,11 +441,11 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
         partial_sum = attr_value * (seconds * 500) # 500 samples per second
         # print(f"(uplink) attr_value = {attr_value}")
         # print(f"(uplink) partial_sum = {partial_sum}")
-        setattr(bio, sum_field, str(int(getattr(bio, sum_field)) + partial_sum))
-        # print(f"(uplink) bio.sum_field = {int(getattr(bio, sum_field))}")
-        setattr(bio, time_field, str(int(getattr(bio, time_field)) + seconds))
-        # print(f"(uplink) bio.time_field = {int(getattr(bio, time_field))}")
-        setattr(bio, attr, str(round(int(getattr(bio, sum_field))/(int(getattr(bio, time_field)) * 500))))
+        setattr(bio, sum_field, getattr(bio, sum_field) + partial_sum)
+        # print(f"(uplink) bio.sum_field = {getattr(bio, sum_field)}")
+        setattr(bio, time_field, getattr(bio, time_field) + seconds)
+        # print(f"(uplink) bio.time_field = {getattr(bio, time_field)}")
+        setattr(bio, attr, round(getattr(bio, sum_field)/(getattr(bio, time_field) * 500)))
       else:
         pass # Lack of continuity upon message delivery. Leave avg_bpm/avg_ibi without updating
   else:
@@ -427,13 +457,13 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
       time_field = attr[4:] + "_time"
 
       # Inititialize sum and time fields
-      setattr(bio, sum_field, str(0))
-      setattr(bio, time_field, str(0))
+      setattr(bio, sum_field, 0)
+      setattr(bio, time_field, 0)
 
       if (bio_24 != None):
         if (shipment_policy == constants.REGULAR_SHIP_POLICY):
-          setattr(bio, sum_field, str(attr_value * 630 * 500))
-          setattr(bio, time_field, str(630)) # regular shipment interval in seconds
+          setattr(bio, sum_field, attr_value * 630 * 500)
+          setattr(bio, time_field, 630) # regular shipment interval in seconds
 
         elif (shipment_policy == constants.RECOVERY_SHIP_POLICY):
           # Former day passed in the midst of a RECOVERY_SHIP_POLICY
@@ -444,8 +474,8 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
             dev_hist = models.Device_History.objects.get(dev_conf=dev_hist.dev_conf, date=date)
             seconds = get_sec_diff(datetime_obj, dev_hist.last_msg_time)
             if (seconds <= constants.MAX_TIME_DELAY):
-              setattr(bio, sum_field, str(attr_value * seconds * 500))
-              setattr(bio, time_field, str(seconds))
+              setattr(bio, sum_field, attr_value * seconds * 500)
+              setattr(bio, time_field, seconds)
             else:
               pass # Lack of continuity upon message delivery. Leave avg_bpm/avg_ibi without updating
           except models.Device_History.DoesNotExist:
@@ -733,7 +763,7 @@ async def notify_contact(**kwargs):
         emerg_qs = await async_Emergency_Biometrics_filter(patient=patient)
         try:
           # Get the latest emergency record
-          emergency = await emerg_qs.alatest("emerg_timestamp")
+          emergency = await emerg_qs.alatest("spawn_timestamp")
           pcontact_dict[pcontact] = [emergency, ""]
           break
         except models.Emergency_Biometrics.DoesNotExist: # Should never happen

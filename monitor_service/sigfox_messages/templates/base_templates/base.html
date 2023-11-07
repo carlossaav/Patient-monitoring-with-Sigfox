@@ -1,0 +1,77 @@
+{% load django_bootstrap5 %}
+{% load custom_filters %}
+
+<!DOCTYPE html>
+<html>
+  <head>
+    {% bootstrap_css %}
+    {% bootstrap_javascript %}
+    <style>
+      .shadow {
+        box-shadow: 0 0 10px rgba(0, 255, 0, 0.75);
+      }
+      .welcome-title {
+        text-align: left;
+        position: absolute;
+        top: 0;
+        #left: 0;
+        #right: 0;
+        font-size: 35px;
+        margin-top: 15px;
+        margin-left: 10px;
+        margin-bottom: 30px;
+      }
+      .container-left {
+        text-align: left;
+        margin-left: 0;
+        #margin: 5px;
+      }
+      .container-left-login {
+        text-align: left;
+        margin-top: 90px;
+        margin-left: 0;
+      }
+      .text-center {
+        text-align: center;
+        position: absolute;
+        top: 1;
+        left: 0;
+        right: 0;
+      }
+      .text-right {
+        text-align: right;
+        position: absolute;
+        top: 0;
+        right: 0;
+        margin: 10px;
+      }
+      </style>
+  </head>
+  <body>
+    <header>
+      {% if request.user.is_authenticated %}
+        <div class="container container-left">
+          <a href="{% url 'logout' %}?next={% url 'login' %}" class="btn btn-primary mt-2 mb-3">Log out</a>
+        </div>
+        {% if request.path|differs_from:"/sigfox_messages/" %}
+          <div class="text-right mt-2">
+            <a href="{% url 'index' %}" class="btn btn-secondary">Back to main portal</a>
+          </div>
+        {% endif %}
+      {% endif %}
+    </header>
+    <main>
+      {% if request.user.is_authenticated %}
+        <div class="container container-left">
+          {% block content %}
+          {% endblock %}
+        </div>
+      {% else %}
+        {% block login_content %}
+        {% endblock %}
+      {% endif %}
+    </main>
+    <footer>
+    </footer>
+  </body>
+</html>

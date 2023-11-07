@@ -1,42 +1,98 @@
-{% if request.user.is_authenticated %}
-  <a href="{% url 'logout' %}?next={% url 'index' %}">Log out</a>
+{% extends 'base_templates/base.html' %}
+
+{% block content %}
   {% if not_allowed %}
-    <p><strong>You're not allowed to see this information.</strong></p>
+    <div class="alert alert-danger mt-2">
+      <p>You're not allowed to see this information.</p>
+    </div>
   {% else %}
     {% if epayload %}
-      <p><strong>Individual payload from the emergency raised at 
-      <a href="{% url 'emergency_detail' epayload.emergency.id %}">
-      {{ epayload.emergency.emerg_timestamp }}</a></strong></p>
-      <ul>
-      <li><strong>Payload reason of the emergency:</strong> {{ epayload.ereason_payload }}</li>
-      <li>Message type: {{ epayload.msg_type }}</li>
-      <li>Payload_format: {{ epayload.payload_format }} </li>
-      <li>Average bpm: {{ epayload.avg_bpm }} </li>
-      <li>Average ibi: {{ epayload.avg_ibi }} </li>
-      <li>Maximum bpm recorded: {{ epayload.max_bpm }} </li>
-      <li>Minimum bpm recorded: {{ epayload.min_bpm }} </li>
-      <li>Maximum ibi recorded: {{ epayload.max_ibi }} </li>
-      <li>Minimum ibi recorded: {{ epayload.min_ibi }} </li>
-      <li>Time distribution of bpm ranges on the interval:</li>
-      <ul>
-      {% if ranges %}
-        {% for t in ranges %}
-          <li>{{ t.0 }} bpm: {{ t.1 }}%</li>
-        {% endfor %}
-      {% else %}
-        <li>Not available</li>
-      {% endif %}
+      <div class="alert alert-info mt-2">
+        <h5>Individual payload from the emergency raised at 
+        <a href="{% url 'emergency_detail' epayload.emergency.id %}">
+        {{ epayload.emergency.spawn_timestamp }}</a></h5>
+      </div>
+
+      <p class="alert alert-warning">The <strong>payload format</strong> indicates the statistics 
+      present on the message. Those which are not present, will be displayed with a zero value.</p>
+
+      <ul class="list-group mt-3">
+        <li class="list-group-item"><strong>Payload reason of the emergency:</strong> 
+        {{ epayload.ereason_payload }}</li>
+        <li class="list-group-item"><strong>Message type:</strong> {{ epayload.msg_type }}</li>
+        <li class="list-group-item"><strong>Payload_format:</strong> {{ epayload.payload_format }}</li>
+        <li class="list-group-item"><strong>Elapsed milliseconds:</strong> {{ epayload.elapsed_ms }}</li>
       </ul>
-      <li>Temperature record: {{ epayload.temp }}</li>
-      <li>Elapsed milliseconds: {{ epayload.elapsed_ms }}</li>
-      </ul>
+
+      <div class="row">
+        <div class="col-md-8">
+          <div class="card mt-3">
+            <div class="card-body">
+              <h5 style="color: red;" class="card-title">Distribution of BPM ranges over the interval:</h5>
+              {% if ranges %}
+                <ul class="list-group">
+                  {% for t in ranges %}
+                    <li class="list-group-item"><strong>{{ t.0 }} bpm:</strong> {{ t.1 }}%</li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <p><strong>Not available</strong></p>
+              {% endif %}
+            </div>
+          </div>
+          <div class="card mt-3">
+            <div class="card-body">
+              <h5 style="color: green;" class="card-title">Body Temperature statistics</h5>
+              <table class="table table-striped">
+                <tbody>
+                  <tr>
+                    <th style="color: #8B4513;">Last temperature recorded:</th>
+                    <td>{{ epayload.temp }} ºC</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card mt-3">
+            <div class="card-body">
+              <h5 style="color: #00BFFF;" class="card-title">Heart Rate statistics</h5>
+              <table class="table table-striped">
+                <tbody>
+                  <tr>
+                    <th style="color: red;">Average bpm:</th>
+                    <td>{{ epayload.avg_bpm }}</td>
+                  </tr>
+                  <tr>
+                    <th style="color: blue;">Average ibi:</th>
+                    <td>{{ epayload.avg_ibi }}</td>
+                  </tr>
+                  <tr>
+                    <th style="color: red;">Maximum bpm recorded:</th>
+                    <td>{{ epayload.max_bpm }}</td>
+                  </tr>
+                  <tr>
+                    <th style="color: blue;">Maximum ibi recorded:</th>
+                    <td>{{ epayload.max_ibi }}</td>
+                  </tr>
+                  <tr>
+                    <th style="color: red;">Minimum bpm recorded:</th>
+                    <td>{{ epayload.min_bpm }}</td>
+                  </tr>
+                  <tr>
+                    <th style="color: blue;">Minimum ibi recorded:</th>
+                    <td>{{ epayload.min_ibi }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
     {% else %}
-      <p>Emergency payload data not found</p>
+      <p class="alert alert-warning mt-3">Emergency payload data not found</p>
     {% endif %}
   {% endif %}
-  <BR>
-  <a href="{% url 'index' %}">Back to main portal</a></p>
-{% else %}
-  <p>Log in to see this page</p>
-  <a href="{% url 'login' %}?next={{request.path}}">Log in</a>
-{% endif %}
+{% endblock %}

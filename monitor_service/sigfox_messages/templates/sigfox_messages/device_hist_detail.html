@@ -1,28 +1,31 @@
-{% if request.user.is_authenticated %}
-  <a href="{% url 'logout' %}?next={% url 'index' %}">Log out</a>
+{% extends 'base_templates/base.html' %}
+
+{% block content %}
   {% if not_allowed %}
-    <p><strong>You're not allowed to see this information.</strong></p>
+    <div class="alert alert-danger">
+      <strong>You're not allowed to see this information.</strong>
+    </div>
   {% else %}
     {% if dev_hist %}
-      <p><strong>Activity log of device 
-      <a href="{% url 'device_config_detail' dev_hist.dev_conf %}">
-      {{ dev_hist.dev_conf }}</a> on date {{ dev_hist.date }}:</strong></p>
-      <ul>
-      <li>Running since: {{ dev_hist.running_since }} </li>
-      <li>Last message sent at: {{ dev_hist.last_msg_time }} </li>
-      <li>Last reported state: {{ dev_hist.last_dev_state }}</li>
-      <li>Last known latitude: {{ dev_hist.last_known_latitude }} </li>
-      <li>Last known longitude: {{ dev_hist.last_known_longitude }} </li>
-      <li>Number of messages sent: {{ dev_hist.uplink_count }} </li>
-      <li>Number of resets (asked for configuration): {{ dev_hist.downlink_count }} </li>
+      <div class="alert alert-info">
+        <h4>Activity log of device 
+        <a href="{% url 'device_config_detail' dev_hist.dev_conf %}">{{ dev_hist.dev_conf }}</a>
+        on date {{ dev_hist.date }}:</h4>
+      </div>
+      <ul class="list-group mt-3">
+        <li class="list-group-item"><strong>Running since:</strong> {{ dev_hist.running_since }}</li>
+        <li class="list-group-item"><strong>Last message sent at:</strong> {{ dev_hist.last_msg_time }}</li>
+        <li class="list-group-item"><strong>Last reported state:</strong> {{ dev_hist.last_dev_state }}</li>
+        <li class="list-group-item"><strong>Last known latitude:</strong> {{ dev_hist.last_known_latitude }}</li>
+        <li class="list-group-item"><strong>Last known longitude:</strong> {{ dev_hist.last_known_longitude }}</li>
+        <li class="list-group-item"><strong>Number of messages sent:</strong> {{ dev_hist.uplink_count }}</li>
+        <li class="list-group-item"><strong>Number of resets (asked for configuration):</strong>
+        {{ dev_hist.downlink_count }}</li>
       </ul>
     {% else %}
-      <h3>There's no activity logged to be shown.</h3>
+      <div class="alert alert-warning mt-3">
+        <p><strong>There's no activity logged to be shown.</strong></p>
+      </div>
     {% endif %}
   {% endif %}
-  <BR>
-  <a href="{% url 'index' %}">Back to main portal</a>
-{% else %}
-  <p>Log in to see this page</p>
-  <a href="{% url 'login' %}?next={{request.path}}">Log in</a>
-{% endif %}
+{% endblock %}

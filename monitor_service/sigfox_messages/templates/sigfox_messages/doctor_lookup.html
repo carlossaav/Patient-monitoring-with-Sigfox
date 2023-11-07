@@ -1,29 +1,20 @@
-{% if request.user.is_authenticated %}
-  <a href="{% url 'logout' %}?next={% url 'index' %}">Log out</a>
+{% extends 'base_templates/base.html' %}
+
+{% block content %}
   {% if request.user.is_staff %}
     {% if doctor_list %}
-      <p><strong>Below are the doctors currently registered on database:</strong></p>
-      <ul>
+      <h4 class="alert alert-info mt-2">Below are the doctors currently registered on the Monitoring System:</h4>
+      <ul class="list-group mt-3">
       {% for doctor in doctor_list %}
-        <li><a href="{% url 'doctor_detail' doctor.id %}">{{ doctor.name }} {{ doctor.surname }}</a></li>
+        <li class="list-group-item"><a href="{% url 'doctor_detail' doctor.id %}">
+        {{ doctor.name }} {{ doctor.surname }}</a></li>
       {% endfor %}
       </ul>
     {% else %}
-      <p><strong>There are no doctors currently registered in our system</strong></p>
+      <p class="alert alert-warning mt-3">There are no doctors currently registered in our system</p>
     {% endif %}
-    {% if form %}
-      <h3>New Doctor</h3>
-      <form action="{% url 'doctor_lookup' %}" method="post">
-      {% csrf_token %}
-      {{ form.as_p }}
-      <input type="submit" value="Submit" />
-      </form>
-    {% endif %}
+    <a href="{% url 'add_doctor' %}" class="btn btn-primary mt-3">Add a new Doctor to Database</a>
   {% else %}
-    <p>Only authorised users can see this information</p>
+    <p class="alert alert-danger mt-3">Only authorised users can see this information</p>
   {% endif %}
-  <a href="{% url 'index' %}">Back to main portal</a></p>
-{% else %}
-  <p>Log in as an authorised user to see this page</p>
-  <a href="{% url 'login' %}?next={{request.path}}">Log in</a>
-{% endif %}
+{% endblock %}

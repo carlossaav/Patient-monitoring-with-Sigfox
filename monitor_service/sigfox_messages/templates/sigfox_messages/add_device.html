@@ -1,0 +1,27 @@
+{% extends 'base_templates/base.html' %}
+
+{% block content %}
+  {% if request.user.is_staff %}
+    {% if form %}
+      <div class="mt-2">
+        <h4 class="mb-3">New Device</h4>
+        <form action="{% url 'add_device' %}" method="post">
+          {% csrf_token %}
+          <strong>{{ form.as_p }}<strong>
+          <div class="alert alert-info mt-3">
+            <strong>Bpm limit window*: threshold in seconds exceeding a higher or lower bpm 
+            limit without triggering an emergency condition</strong>
+          </div>
+          <div class="alert alert-info mt-3">
+            <strong>Minimum delay*: Minimal delay between configured bpm extremes</strong>
+          </div>
+          <input type="submit" class="btn btn-primary" value="Submit"/>
+        </form>
+      </div>
+    {% else %}
+      <p class="alert alert-warning mt-3">Some error happened.</p>
+    {% endif %}
+  {% else %}
+    <p class="alert alert-danger mt-3">Only authorized users can see this information</p>
+  {% endif %}
+{% endblock %}

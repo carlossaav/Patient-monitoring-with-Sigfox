@@ -1,57 +1,123 @@
-{% if request.user.is_authenticated %}
-  <a href="{% url 'logout' %}?next={% url 'index' %}">Log out</a>
+{% extends 'base_templates/base.html' %}
+
+{% block content %}
   {% if not_allowed %}
-    <p><strong>You're not allowed to see this information.</strong></p>
+    <div class="alert alert-danger mt-2">
+      <p>You're not allowed to see this information.</p>
+    </div>
   {% else %}
     {% if bio %}
-      {% if last_day %}
-        <p><strong>Latest daily-based biometrics </strong>
-        {% if date %}
-          ({{ date }}) 
-        {% endif %}
-        <strong>from patient <a href="{% url 'patient_detail' bio.patient %}">
-        {{ bio.patient.name }} {{ bio.patient.surname }}</a>:</strong></p>
-      {% else %}
-        <p><strong>Biometrics gathered from patient <a href="{% url 'patient_detail' bio.patient %}">
-        {{ bio.patient.name }} {{ bio.patient.surname }}</a>
-        {% if date %}
-          on </strong>{{ date }}:</p>
+      <div class="alert alert-info mt-2">
+        {% if last_day %}
+          <h4>Latest daily-based biometrics ({{ dev_hist.date }}) from patient 
+          <a href="{% url 'patient_detail' bio.patient %}">{{ bio.patient.name }} {{ bio.patient.surname }}</a>:</h4>
         {% else %}
-          :</strong></p>
-        {% endif %}
-      {% endif%}
-      <ul>
-      <li>Average bpm: {{ bio.avg_bpm }} </li>
-      <li>Average ibi: {{ bio.avg_ibi }} </li>
-      <li>Maximum bpm recorded: {{ bio.max_bpm }}</li>
-      <li>Minimum bpm recorded: {{ bio.min_bpm }}</li>
-      <li>Maximum ibi recorded: {{ bio.max_ibi }}</li>
-      <li>Minimum ibi recorded: {{ bio.min_ibi }}</li>
-      <li>Time distribution of bpm ranges on the day:</li>
-      <ul>
-      {% if ranges %}
-        {% for t in ranges %}
-          <li>{{ t.0 }} bpm: {{ t.1 }}%</li>
-        {% endfor %}
-      {% else %}
-        <li>Not available</li>
+          <h4>Biometrics gathered from patient <a href="{% url 'patient_detail' bio.patient %}">
+          {{ bio.patient.name }} {{ bio.patient.surname }}</a> on {{ dev_hist.date }}:</h4>
+        {% endif%}
+      </div>
+
+      {% if dev_hist %}
+        <div class="alert alert-warning mt-2">
+          <p><strong>Device running since:</strong> {{ dev_hist.running_since }} 
+          <strong>Device last message: </strong>{{ dev_hist.last_msg_time }}
+          {% if time_diff %}
+            <strong>Sampling interval: </strong>{{ time_diff }} h</p>
+          {% else %}
+            </p>
+            {% if dev_hist.continuous_delivery == False %}
+              <p>Since device's message delivery wasn't continuous in time since it started collecting
+              samples, we can't ensure time gap between last message and device's boot time is effectively equal 
+              to sampling's interval duration.</p>
+            {% else %}
+              {% if dev_hist.uplink_count == 1 %}
+                <p>The device sent only one message since it booted up.</p>
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        </div>
       {% endif %}
-      </ul>
-      <li>Last temperature recorded: {{ bio.last_temp }}</li>
-      <li>Average temperature: {{ bio.avg_temp }}</li>
-      <li>Maximum temperature recorded: {{ bio.max_temp }}</li>
-      <li>Minimum temperature recorded: {{ bio.min_temp }}</li>
-      <li>Last ALARM message time: {{ bio.last_alarm_time }}</li>
-      <li>Last LIMITS message time: {{ bio.last_limit_time }}</li>
-      <li>Last emergency limit detection time: {{ bio.last_elimit_time }}</li>
-      </ul>
-      <BR>
+
+      <div class="row mt-3">
+        <div class="col-md-8">
+          <div class="card mt-2">
+            <div class="card-body">
+              <h5 style="color: red;" class="card-title">Distribution of BPM ranges over the day:</h5>
+              {% if ranges %}
+                <ul class="list-group">
+                  {% for t in ranges %}
+                    <li class="list-group-item"><strong>{{ t.0 }} bpm:</strong> {{ t.1 }}%</li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <p><strong>Not available</strong></p>
+              {% endif %}
+            </div>
+          </div>
+          <div class="card mt-3">
+            <div class="card-body">
+              <h5 style="color: green;" class="card-title">Body Temperature statistics</h5>
+              <table class="table table-striped">
+                <tbody>
+                  <tr>
+                    <th style="color: #8B4513;">Last temperature recorded:</th>
+                    <td>{{ bio.last_temp }} ºC</td>
+                  </tr>
+                  <tr>
+                    <th style="color: #8B4513;">Average temperature:</th>
+                    <td>{{ bio.avg_temp }} ºC</td>
+                  </tr>
+                  <tr>
+                    <th style="color: #8B4513;">Maximum temperature recorded:</th>
+                    <td>{{ bio.max_temp }} ºC</td>
+                  </tr>
+                  <tr>
+                    <th style="color: #8B4513;">Minimum temperature recorded:</th>
+                    <td>{{ bio.min_temp }} ºC</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card mt-2">
+            <div class="card-body">
+              <h5 style="color: #00BFFF;" class="card-title">Heart Rate statistics</h5>
+              <table class="table table-striped">
+                <tbody>
+                  <tr>
+                    <th style="color: red;">Average bpm:</th>
+                    <td>{{ bio.avg_bpm }}</td>
+                  </tr>
+                  <tr>
+                    <th style="color: blue;">Average ibi:</th>
+                    <td>{{ bio.avg_ibi }}</td>
+                  </tr>
+                  <tr>
+                    <th style="color: red;">Maximum bpm recorded:</th>
+                    <td>{{ bio.max_bpm }}</td>
+                  </tr>
+                  <tr>
+                    <th style="color: blue;">Maximum ibi recorded:</th>
+                    <td>{{ bio.max_ibi }}</td>
+                  </tr>
+                  <tr>
+                    <th style="color: red;">Minimum bpm recorded:</th>
+                    <td>{{ bio.min_bpm }}</td>
+                  </tr>
+                  <tr>
+                    <th style="color: blue;">Minimum ibi recorded:</th>
+                    <td>{{ bio.min_ibi }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
     {% else %}
-      <p>Requested biometrics data not found</p>
+      <p class="alert alert-warning mt-3 mb-3">Requested biometrics data not found</p>
     {% endif %}
   {% endif %}
-  <a href="{% url 'index' %}">Back to main portal</a></p>
-{% else %}
-  <p>Log in to see this page</p>
-  <a href="{% url 'login' %}?next={{request.path}}">Log in</a>
-{% endif %}
+{% endblock %}

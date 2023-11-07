@@ -1,7 +1,20 @@
-<h1>Welcome to Sifgox Patient Monitoring System</h1>
-<p>Please fill in the following form to sign in into our system:</p>
-<form method="post" action=".">
-  {% csrf_token %}
-  {{ form.as_p }}
-  <input type="submit" value="Submit" />
-</form>
+{% extends 'base_templates/base.html' %}
+
+{% block login_content %}
+  <p class="welcome-title">Welcome to Sifgox Patient Monitoring System</p>
+  <div class="container container-left-login">
+    <p class="mt-3"><strong>Please fill in the following form to sign up in our system:
+    </strong></p>
+    <form method="post" action=".">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <input type="submit" class="btn btn-primary" value="Submit"/>
+    </form>
+  </div>
+
+  <div class="text-right mt-3">
+    <p class="alert alert-info"><strong>Already have an account?</strong>
+    <a href="{% url 'login' %}" class="btn btn-primary">Sign in</a></p>
+  </div>
+  
+{% endblock %}
