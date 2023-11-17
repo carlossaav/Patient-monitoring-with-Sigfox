@@ -2,34 +2,50 @@
 # after which all records will be erased from Database.
 KEEP_RECORDS = 10
 
-# Estimation of number of samples for each interval
-# REGULAR_SHIP_UPDATE_SAMPLES = 315000
-
 # 22'40" (higher recovery sequence delay plus failed shipment (1 min) plus 
 # delivery delay (40 seconds) from Sigfox Backend)
 MAX_TIME_DELAY = 1360
 
-# Mimimum time to regard a new emergency message as another emergency (in seconds)
-NEW_EMERG_DELAY = 2700 # 45 minutes
+# Mimimum time to regard a new emergency message as another emergency (in minutes)
+NEW_EMERG_DELAY = 90
 
 # Mimimum time to resend a SMS notification (in minutes)
-SMS_DELAY = 20
+SMS_DELAY = 15
 
-# Introduce seconds delay between calls to send_message()
-MESSAGE_DELAY = 2
+# Specify the minimum number of chats which must acknowledge the emergency
+# situation (issue '/stop' command) before stopping the notification
+# process for those who haven't noticed yet. Set it to 0 to keep notification
+# process active until the user acknowledges the emergency.
+STOP_ON_NCHATS_AWARENESS = 2
+
+## TELEGRAM API LIMITS ##
+# Keep our Bot and Notification processes responsive by keeping
+# our shipping rates above the maximum allowed by the Telegram Service.
+# To not overload Telegram servers and keep our Bot and Notification
+# processes responsive, a seconds delay must be introduced between calls to Bot's
+# shipping functions like send_message() and reply_to(). Keep it as close
+# to the maximum shipping rates allowed as possible (about 30 messages per second
+# on different chats and 1 on a single chat according to Telegram API),
+# for the sake of scalability and responsiveness. If these vars are set over the 
+# rate limits, eventually it'll result in error codes from Telegram library
+
+CHAT_MESSAGE_DELAY = 1.5  # Maximum of 1 message per second for a single chat
+MESSAGE_DELAY = 0.04  # Maximum of 30 messages per second on different chats
 
 # Specify the notification period in seconds for chats
-NOTIFICATION_PERIOD = 25
+NOTIFICATION_PERIOD = 30
 
 # Specify the wait in seconds for a notifier process to leave notification loop
 NOTIFIER_WAIT = 30
 
+# FOR BEST RESULTS ON EMERGENCY ACKNOWLEDGMENT, BEST KEEP 'MAX_NOTIFICATION_TIME'
+# TO A VALUE LOWER THAN 'NEW_EMERG_DELAY'. NOT MANDATORY
 # Specify the maximum notification time, in minutes, while the notification process
-# is active without acknowledgement for both Telegram and SMS contact systems
-MAX_NOTIFICATION_TIME = 120
+# is active without "emergency acknowledgement" for both Telegram and SMS contact systems
+MAX_NOTIFICATION_TIME = 75
 
 # Service url, only used for displaying the service url on Telegram notifications.
-SERVICE_URL = "http://ec2-18-188-48-139.us-east-2.compute.amazonaws.com:8000/sigfox_messages"
+SERVICE_URL = "http://127.0.0.1:8000/sigfox_messages"
 
 # Msg types 
 ALARM_MSG = 0

@@ -66,7 +66,7 @@ class Contact(models.Model):
   chat_username = models.CharField(max_length=50) # Chat's username
   echat_state = models.CharField(max_length=50) # Chat's state
   phone_number = models.CharField(max_length=50) # For SMS contact
-  sms_alerts = models.CharField(max_length=3)  # ("Yes/No")
+  sms_alerts = models.BooleanField(default=True)
 
   def __str__(self):
     return self.echat_id
@@ -77,6 +77,7 @@ class Patient_Contact(models.Model):
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
   contact = models.ForeignKey(Contact, on_delete=models.CASCADE)
   comm_status = models.CharField(max_length=25) # Emergency notification 'state' ("Pending"/"Done")
+  stop_set = models.BooleanField(default=False)
 
   def __str__(self):
     return str(self.patient) + ", " + str(self.contact)
@@ -124,7 +125,7 @@ class Emergency_Biometrics(models.Model):
 class Emergency_Payload(models.Model):
 
   emergency = models.ForeignKey(Emergency_Biometrics, on_delete=models.CASCADE)
-  ereason_payload = models.CharField(max_length=3) # payload where an emergency condition was detected ("Yes/No")
+  ereason_payload = models.BooleanField(default=True) # payload where an emergency condition was detected (True/False)
   msg_type = models.CharField(max_length=25)
   payload_format = models.CharField(max_length=1)
 

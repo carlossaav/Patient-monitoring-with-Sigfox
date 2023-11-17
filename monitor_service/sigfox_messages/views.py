@@ -204,8 +204,8 @@ def uplink(request):
     last_msg_time = models.Device_History.objects.filter(dev_conf=dev_conf).latest("date").last_msg_time
     if emergency:
       # check emergency creation/reactivation
-      seconds = utils.get_sec_diff(datetime_obj, ebio.spawn_timestamp)
-      if (seconds > constants.NEW_EMERG_DELAY):
+      minutes = int((utils.get_sec_diff(datetime_obj, ebio.spawn_timestamp)) // 60) # Convert it to minutes
+      if (minutes >= constants.NEW_EMERG_DELAY):
         new_e = 1 # create a new one
         if (ebio.active): # Deactivate emergency
           ebio.active = False
@@ -393,11 +393,6 @@ def uplink(request):
   # Add individual payload fields to Emergency_Payload table
 
   if emergency:
-    if ereason_payload:
-      ereason = "Yes"
-    else:
-      ereason = "No"
-
     if (msg_type == constants.ALARM_MSG):
       m_type = "ALARM_MSG"
     elif (msg_type == constants.LIMITS_MSG):
@@ -415,7 +410,7 @@ def uplink(request):
     elif (msg_type == constants.REPORT_MSG):
       m_type = "REPORT_MSG"
 
-    epayload = models.Emergency_Payload(emergency=ebio, ereason_payload=ereason,
+    epayload = models.Emergency_Payload(emergency=ebio, ereason_payload=ereason_payload,
                                         msg_type=m_type, payload_format=str(payload_format),
                                         avg_bpm=avg_bpm, avg_ibi=avg_ibi,
                                         max_bpm=max_bpm, max_ibi=max_ibi,
