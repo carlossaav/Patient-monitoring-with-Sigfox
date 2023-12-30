@@ -74,7 +74,7 @@ There are several types of messages that our ArduinoMKRFOX1200 will send to the 
 
 - **ERROR_MSG**: Some error happened on any of the sensors.
 
-- **REPORT_MSG**: Sent in normal conditions. That is no errors on the sensors, absence of limits exceeded, and the user did not pressed the alarm 
+- **REPORT_MSG**: Sent in normal conditions. That is no errors on the sensors, absence of limits exceeded, and the user didn't press the alarm 
 button.
 
 - **LIMITS_MSG**: Sent whenever the device records a limit exceeded.
@@ -156,13 +156,14 @@ In this case we'll set a single variant for the payload. First of all, let's def
 - **msg**: total amount of uplink messages sent on the current day. (1 byte)
 - **ub**:  upper bpm limit to be set on the Monitoring program (1 byte)
 - **lb**:  lower bpm limit to be set on the Monitoring program (1 byte)
+- **ut**:  upper temperature limit to be set on the Monitoring program (6 bits)
+- **lt**:  lower temperature limit to be set on the Monitoring program (6 bits)
 - **bt**:  time in seconds that a bpm limit can be exceeded without triggering an emergency condition (7 bits)
-- **bx**:  delay in seconds that must exist between an upper limit exceeded and a lower limit exceeded (2 bytes)
-
+- **bx**:  delay in minutes that must exist between an upper limit exceeded and a lower limit exceeded (4 bits)
 
 * Downlink Payload Format (8 bytes):
 
-- rtc:bt:msg:ub:lb:bx
+- rtc:bt:msg:ub:lb:ut:lt:bx
 
 
 ## Getting measures with [measures.ino](https://github.com/carlossaav/Patient-monitoring-with-Sigfox/blob/master/mkrfox1200/src/test/measures/measures.ino)

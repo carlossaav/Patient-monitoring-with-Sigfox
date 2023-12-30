@@ -25,7 +25,7 @@ class Device_ConfigForm(forms.ModelForm):
 class ModifyDevice_ConfigForm(forms.ModelForm):
   class Meta:
     model = Device_Config
-    exclude = ["dev_id"]
+    exclude = ["dev_id", "higher_ebpm_limit", "lower_ebpm_limit"]
 
 
 class PatientForm(forms.ModelForm):

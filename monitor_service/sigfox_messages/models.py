@@ -5,12 +5,14 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 class Device_Config(models.Model):
 
   dev_id = models.CharField(max_length=15, primary_key=True)
-  higher_bpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
-  lower_bpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
-  higher_ebpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
-  lower_ebpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
-  bpm_limit_window = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(127)])
-  min_delay = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(65535)])
+  lower_bpm_limit = models.IntegerField(validators=[MinValueValidator(31), MaxValueValidator(220)], blank=False, null=False)
+  lower_ebpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(220)], blank=True, null=False)
+  higher_bpm_limit = models.IntegerField(validators=[MinValueValidator(40), MaxValueValidator(224)], blank=False, null=False)
+  higher_ebpm_limit = models.IntegerField(validators=[MinValueValidator(40), MaxValueValidator(255)], blank=True, null=False)
+  min_temp = models.FloatField(validators=[MinValueValidator(35.0), MaxValueValidator(38.8)], blank=False, null=False)
+  max_temp = models.FloatField(validators=[MinValueValidator(35.1), MaxValueValidator(38.9)], blank=False, null=False)
+  bpm_limit_window = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(127)], blank=False, null=False)
+  min_delay = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(15)], blank=False, null=False)
 
   def __str__(self):
     return self.dev_id

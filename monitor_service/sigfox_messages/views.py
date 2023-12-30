@@ -43,7 +43,7 @@ def downlink(request, dev_id):
   dev_hist.downlink_count += 1
   dev_hist.save()
 
-  # Build payload following rtc:bt:msg:ub:lb:bx downlink payload format
+  # Build payload following rtc:bt:msg:ub:lb:ut:lt:bx downlink payload format
 
   l = [int(rtc[:2]), int(rtc[3:5]), int(rtc[6:])]  # hour, minute and sec
 
@@ -56,8 +56,30 @@ def downlink(request, dev_id):
   payload += format(dev_hist.uplink_count, "08b")       # msg  
   payload += format(dev_conf.higher_bpm_limit, "08b")   # ub
   payload += format(dev_conf.lower_bpm_limit, "08b")    # lb
-  payload += format(dev_conf.min_delay, "016b")         # bx
 
+  # Set 'ut' compound field
+  int_part = int(dev_conf.max_temp) - 35
+  if (int_part < 0):
+    int_part = 0
+  payload += format(int_part, "02b")    
+
+  aux = int(dev_conf.max_temp) # floor operation
+  dec_part = dev_conf.max_temp - float(aux) # Get the decimal part of dev_conf.max_temp
+  dec_part *= 10
+  payload += format(int(dec_part), "04b")
+
+  # Set 'lt' compound field
+  int_part = int(dev_conf.min_temp) - 35
+  if (int_part < 0):
+    int_part = 0
+  payload += format(int_part, "02b")    
+
+  aux = int(dev_conf.min_temp) # floor operation
+  dec_part = dev_conf.min_temp - float(aux) # Get the decimal part of dev_conf.min_temp
+  dec_part *= 10
+  payload += format(int(dec_part), "04b")
+
+  payload += format(dev_conf.min_delay, "04b")          # bx
   payload = hex(int(payload, 2))[2:] # Convert to hex string. Skip '0x' chars
 
   d = {dev_id: {"downlinkData": payload}}
@@ -844,10 +866,12 @@ def modify_device_config(request, device_id):
     if (request.method == "POST"):
       form = forms.ModifyDevice_ConfigForm(request.POST)
       if (form.is_valid()):
-        dev_conf.higher_bpm_limit = form.cleaned_data["higher_bpm_limit"]
         dev_conf.lower_bpm_limit = form.cleaned_data["lower_bpm_limit"]
-        dev_conf.higher_ebpm_limit = form.cleaned_data["higher_ebpm_limit"]
-        dev_conf.lower_ebpm_limit = form.cleaned_data["lower_ebpm_limit"]
+        dev_conf.lower_ebpm_limit = dev_conf.lower_bpm_limit - constants.LOWER_BPM_ELIMIT_SUM
+        dev_conf.higher_bpm_limit = form.cleaned_data["higher_bpm_limit"]
+        dev_conf.higher_ebpm_limit = dev_conf.higher_bpm_limit + constants.HIGHER_BPM_ELIMIT_SUM
+        dev_conf.min_temp = form.cleaned_data["min_temp"]
+        dev_conf.max_temp = form.cleaned_data["max_temp"]
         dev_conf.bpm_limit_window = form.cleaned_data["bpm_limit_window"]
         dev_conf.min_delay = form.cleaned_data["min_delay"]
         dev_conf.save()

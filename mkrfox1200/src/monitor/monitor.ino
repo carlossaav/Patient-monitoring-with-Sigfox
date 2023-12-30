@@ -16,11 +16,9 @@
 #define PULSE_THRESHOLD 2150   // Determine which Signal to "count as a beat" and which to ignore
 
 #define UPPER_BPM_MEASURE 0
-#define UPPER_BPM_LIMIT 120
-#define UPPER_BPM_ELIMIT 140
+#define UPPER_BPM_LIMIT 110
 #define LOWER_BPM_MEASURE 1
 #define LOWER_BPM_LIMIT 65
-#define LOWER_BPM_ELIMIT 55
 
 #define UPPER_TEMP_MEASURE 2
 #define UPPER_TEMP_LIMIT 37.5
@@ -53,10 +51,8 @@
 // Time before enabling 'critical' emergency shipment's rate again
 #define NEW_EMERG_DELAY 1200000 // 20 min
 
-// Bpm Limit exceeded threshold to activate Emergency shipment's policy
-#define BPM_LIM_COUNT_EPOL_TRIGGERING 22500 // Getting this as a measure of time exceeding a bpm limit. 30000 samples equals to 1 minute more less
-
-#define BOTH_LIMITS_EXCEEDED_DELAY 60000 // Time to reach the opposite bpm limit again
+#define BPM_LIM_EPOL_TRIGGERING 30000 // 30 seconds
+#define BOTH_LIMITS_EXCEEDED_DELAY 900000 // 15 minutes
 
 #define MAX_UPLINK_MSGS 140
 #define SHIPMENT_INTERVAL 630000  // 10'30"
@@ -72,6 +68,9 @@
 #define CHECK_ERROR_COND 30000
 #define FAILED_DOWNLINK_RECEPTION 62 // ("0x62")
 
+/* Every call to getBeatsPerMinute() and getInterBeatIntervalMs()
+ * on loop() function takes place every 2 milliseconds --> Sample rate of 2 ms */
+#define LOOP_DELAY 2
 
 // Default values on Temperature or PulseSensor errors
 #define BPM_READING_ERR 0  // Must be positive number or zero
@@ -99,6 +98,9 @@ byte range_top; // Determined by ranges width
 byte ubpm_lim = UPPER_BPM_LIMIT;
 byte lbpm_lim = LOWER_BPM_LIMIT;
 
+float utemp_lim = UPPER_TEMP_LIMIT;
+float ltemp_lim = LOWER_TEMP_LIMIT;
+
 /* To later process where bpm readings have been falling across the interval, 
  * we'll define a set of BPM Ranges:
  * ranges[0] stores bpm reading counts in range [0, lbpm_lim-1]
@@ -121,15 +123,24 @@ byte rec_matrix[MAX_RECOVERY_MSG][SHIPMENT_BUFFER_SIZE];
 
 struct bpm_limit {
   unsigned int counter;  // Counter of times the measure (high or low bpm limit) has been exceeded
-  unsigned long tstamp;  // timestamp of last limit exceeded
+  unsigned long tstamp;  // last limit exceeded timestamp
 };
 
 /* bpm_limits[0][1] for upper and lower bpm measurements */
 struct bpm_limit bpm_limits[2];
 
+byte ubpm_lim_cond_set = 0;
+byte lbpm_lim_cond_set = 0;
+unsigned long ubpm_lim_cond_timestamp = 0;
+unsigned long lbpm_lim_cond_timestamp = 0;
 
-unsigned int bpm_lim_epol_trigg = BPM_LIM_COUNT_EPOL_TRIGGERING;
+/* Time threshold allowed exceeding a bpm limit without activating 
+ * Emergency shipment's policy. */
+unsigned long bpm_lim_epol_trigg = BPM_LIM_EPOL_TRIGGERING;
+
+// Time to reach the opposite bpm limit again
 unsigned long both_exceeded_delay = BOTH_LIMITS_EXCEEDED_DELAY;
+
 
 /* Counters */
 int msg = 0; // sent messages
@@ -221,6 +232,7 @@ TimerObject *sigfox_led_timer = new TimerObject((unsigned long int)BUG_FLASH, &f
 TimerObject *sensors_led_timer = new TimerObject((unsigned long int)BUG_FLASH, &flash_sensors_led);
 TimerObject *eled_timer = new TimerObject((unsigned long int)EMERG_FLASH, &flash_emergency_led);
 
+
 void setup() {
 
   Wire.begin();
@@ -243,6 +255,9 @@ void setup() {
   reset_measures();
   reset_buff(recv_buff);
   reset_buff(send_buff);
+
+  for (int i=0; i<(sizeof(bpm_limits) / sizeof(bpm_limits[0])); i++)
+    bpm_limits[i].tstamp = 0;
 
   for (int i=0; i<MAX_RECOVERY_MSG; i++)
     reset_buff(rec_matrix[i]);
@@ -473,10 +488,8 @@ void reset_measures() {
   for (int i=0; i<(sizeof(ranges) / sizeof(ranges[0])); i++)
     ranges[i] = 0;
 
-  for (int i=0; i<(sizeof(bpm_limits) / sizeof(bpm_limits[0])); i++) {
+  for (int i=0; i<(sizeof(bpm_limits) / sizeof(bpm_limits[0])); i++)
     bpm_limits[i].counter = 0;
-    bpm_limits[i].tstamp = 0;
-  }
 
   bpm_ibi_sample_counter = 0;
   limits_exceeded_counter = 0;
@@ -694,7 +707,6 @@ void handle_failed_shipment() {
 }
 
 
-
 void check_retry() {
   if (ship_attempt == MAX_SHIPMENT_RETRIES)
     handle_failed_shipment();
@@ -708,9 +720,9 @@ void check_retry() {
 
 void get_downlink(unsigned long delay) {
 
-  byte *p = (byte *)&both_exceeded_delay;
   byte aux = 0, hour = 0, min = 0, sec = 0;
   unsigned int conv, quotient;
+  float aux_temp = 35.0;
   int i=0;
 
   /* Get hour from recv_buff */
@@ -747,21 +759,49 @@ void get_downlink(unsigned long delay) {
   for (int i=6; i>=0; i--)
     bitWrite(aux, i, bitRead(recv_buff[2], i));
 
-  /* Since bpm_lim_epol_trigg comes in seconds on recv_buff, we have to
-   * translate it to the equivalent amount of bpm readings in that time,
-   * assuming that we gather around 30*10⁴ samples per minute more less */
+  // Convert it to milliseconds
+  bpm_lim_epol_trigg = (unsigned long)aux * 1000;
 
-  bpm_lim_epol_trigg = (unsigned int)aux * 500;
+  msg = recv_buff[3];      // get amount of uplink messages sent on the day
+  ubpm_lim = recv_buff[4]; // get upper bpm limit
+  lbpm_lim = recv_buff[5]; // get lower bpm limit
 
-  msg = recv_buff[3];
-  ubpm_lim = recv_buff[4];
-  lbpm_lim = recv_buff[5];
+  /* Extract max and min temperatures */
 
-  // Get and set both_exceeded_delay from recv_buff (Little-Endian)
-  both_exceeded_delay = 0;
-  p[1] = recv_buff[6];
-  p[0] = recv_buff[7];
-  both_exceeded_delay *= 1000; // We work in milliseconds
+  utemp_lim = 0;
+  aux = 0;
+  for (int i=7; i>=6; i--)
+    bitWrite(aux, i-6, bitRead(recv_buff[6], i));
+
+  aux_temp += (float)aux; // Add the integer part
+  aux = 0;
+  for (int i=5; i>=2; i--)
+    bitWrite(aux, i-2, bitRead(recv_buff[6], i));
+
+  aux_temp += (float)aux/10; // Add the decimal part
+  utemp_lim = aux_temp; // Set upper temperature limit
+
+  // Repeat the process for ltemp_lim
+  ltemp_lim = 0;
+  aux_temp = 35.0;
+  aux = 0;
+  for (int i=1; i>=0; i--)
+    bitWrite(aux, i, bitRead(recv_buff[6], i));
+
+  aux_temp += (float)aux;
+  aux = 0;
+  for (int i=7; i>=4; i--)
+    bitWrite(aux, i-4, bitRead(recv_buff[7], i));
+
+  aux_temp += (float)aux/10;
+  ltemp_lim = aux_temp; // Set lower temperature limit
+
+  // Get both_exceeded_delay value in minutes from recv_buff
+  aux = 0;
+  for (int i=3; i>=0; i--)
+    bitWrite(aux, i, bitRead(recv_buff[7], i));
+
+  both_exceeded_delay = (unsigned long)aux * 60000; // Translate it to milliseconds
 }
 
 
@@ -852,7 +892,6 @@ void send_measurements() {
     }
   }
 
-
   /* Configuring payload... */
 
   /* Setting payload format indicator bits... */
@@ -860,7 +899,6 @@ void send_measurements() {
   bitWrite(send_buff[1], 5, bitRead(payload_format, 2));
   bitWrite(send_buff[2], 2, bitRead(payload_format, 1));
   bitWrite(send_buff[4], 7, bitRead(payload_format, 0));
-
 
   /* Setting first 7 bits of the payload...*/
   
@@ -892,7 +930,6 @@ void send_measurements() {
       write_dec_to_bin(&(send_buff[0]), 7, 3, 3);
       break;
   }
-
 
   /* Computing measurements... */
 
@@ -1024,7 +1061,6 @@ void send_measurements() {
       send_buff[i] = p[j]; // Little endian arch
   }
 
-
   /* Sigfox Module checking */
 
   if (init_sigfox_module() != 0) {
@@ -1086,7 +1122,8 @@ void send_measurements() {
     reset_measures();
     reset_buff(send_buff);
 
-    if (!downlink_done && (SigFox.parsePacket() == RECEIVING_BUFFER_SIZE)) {  // Extract Downlink Message
+    if (!downlink_done && (SigFox.parsePacket() == RECEIVING_BUFFER_SIZE)) {
+      // Extract Downlink Message
       reset_buff(recv_buff);
       for (int i=0; i<RECEIVING_BUFFER_SIZE; i++) {
         if (SigFox.available())
@@ -1153,7 +1190,6 @@ void send_measurements() {
 }
 
 
-
 void disable_timer(TimerObject *timer) {
   timer->Stop();
   timer->setEnabled(false);
@@ -1195,7 +1231,6 @@ void act_emergency() {
 void deact_emergency() {
   emergency = 0;
 }
-
 
 void act_rpol() {
   rpol = 1;
@@ -1240,7 +1275,6 @@ byte check_eseq_act(byte eseq) {
 }
 
 
-
 /* Returns 1 if epol has been activated,
  * otherwise returns 0. */
 byte fire_epol(byte alarm) {
@@ -1276,7 +1310,6 @@ byte fire_epol(byte alarm) {
   if (fired) act_epol();
   return fired;
 }
-
 
 
 void admin_shipping(byte alarm) {
@@ -1339,8 +1372,6 @@ void handle_button_pushed() {
 }
 
 
-
-
 /* Interrupt Service Routine button_pressed(),
  * triggered whenever the user pushes the emergency button */
 void button_pressed() {
@@ -1351,11 +1382,11 @@ void button_pressed() {
 /* Functions to check if any 
  * elimit has been exceeded */
 byte check_upper_elimit(byte bpm) {
-  return (bpm > UPPER_BPM_ELIMIT);
+  return (bpm > (ubpm_lim + 15));
 }
 
 byte check_lower_elimit(byte bpm) {
-  return (bpm < LOWER_BPM_ELIMIT);
+  return (bpm < (lbpm_lim - 10));
 }
 
 
@@ -1374,29 +1405,60 @@ byte check_elimits(byte measure, byte value) {
 void limit_exceeded(byte measure, byte value) {
 
   unsigned long tstamp = millis();
-  byte both_exceeded, aux, i;
+  unsigned long *bpm_lim_cond_timestamp;
+  byte i;
+  byte *bpm_lim_cond_set;
+  static unsigned long idle_time; // shared between upper and lower bpm limits for 'bt' condition
 
   limits_exceeded_counter++;
   switch (measure) {
     case UPPER_BPM_MEASURE:
       i=0;
+      bpm_lim_cond_set = (byte *)&ubpm_lim_cond_set;
+      bpm_lim_cond_timestamp = (unsigned long *)&ubpm_lim_cond_timestamp;
       break;
     case LOWER_BPM_MEASURE:
       i=1;
+      bpm_lim_cond_set = (byte *)&lbpm_lim_cond_set;
+      bpm_lim_cond_timestamp = (unsigned long *)&lbpm_lim_cond_timestamp;
       break;
     default: // UPPER_TEMP_MEASURE || LOWER_TEMP_MEASURE
-      return; // Do not continue, just count the temp limit exceeded
+      return; // Do not continue, just count the temperature limit exceeded
   }
 
   bpm_limits[i].counter++;
+
+  if (!epol_active() && !rpol_active()) {
+    if (*bpm_lim_cond_set == 0) {
+      /* Reset the monitoring of 'bt' condition */
+      *bpm_lim_cond_set = 1;
+      *bpm_lim_cond_timestamp = tstamp;
+      idle_time = 0;
+    }
+    else {
+      // Check out when last bpm limit exceeded took place 
+      unsigned long aux = tstamp - bpm_limits[i].tstamp;
+      if (aux > LOOP_DELAY) {
+        /* Continuity broken between calls to limit_exceeded().
+        * Such difference is not reflecting the real time exceeding a 
+        * bpm limit. Something happened in betweeen calls to limit_exceeded(),
+        * like a shipment, which may take more than 10 seconds to complete.
+        * Store that '"idle time' to be substracted later on 'bt' condition checking. */
+
+        // substract loop iteration time
+        idle_time += (aux - LOOP_DELAY);
+      }
+    }
+  }
+
   bpm_limits[i].tstamp = tstamp;
 
   if (check_elimits(measure, value)) {
 
     if (elim)
-      /* Whatever elim has been exceeded, there's been
-       * a previous elim before this one took place
-       * that hasn't been attended yet. */
+    /* Whatever elim has been exceeded, there's been
+      * a previous elim before this one took place
+      * that hasn't been attended yet. */
       return;
 
     elim = 1;
@@ -1404,56 +1466,56 @@ void limit_exceeded(byte measure, byte value) {
     admin_shipping(0);
   }
 
-  if (epol_active() || rpol_active())
+  if (epol_active() || rpol_active()) {
+    *bpm_lim_cond_set = 0;
     return;
-
-  /* No policies active at this point */
-
-  aux = i;
-  if (measure==UPPER_BPM_MEASURE)
-    if ((both_exceeded = bpm_limits[++i].counter)==0) i--;
-  else // LOWER_BPM_MEASURE
-    if ((both_exceeded = bpm_limits[--i].counter)==0) i++;
-
-  if (both_exceeded) {
-    // max and min limits of bpm violated, trigger emergency
-    if ((tstamp - bpm_limits[i].tstamp) < both_exceeded_delay) {
-      if (fire_epol(0)) {
-        act_emergency(); // do it here?
-        ereason_payload = 1;
-        sched_shipment(0);
-      }
-      else {
-        // implement behaviour
-      }
-      return; // If fire_epol() fails, chances of firing epol on next if block won't change too much.
-    }
-    i = aux; // Restore index
   }
 
-  if (bpm_limits[i].counter > bpm_lim_epol_trigg) {
-  /* Limits exceeded too many times.
-   * Activate emergency shipment's policy. */
-    if (fire_epol(0)) {
-      act_emergency(); // do it here?
-      ereason_payload = 1;
-      sched_shipment(0);
-    }
-    else {
-      // implement behaviour
-    }
+  /* No policies active at this point.
+   * Start by checking out 'bx' condition presence
+   * (value shipped on downlink payload) */
+
+  if (measure==UPPER_BPM_MEASURE) i++;
+  else i--; // LOWER_BPM_MEASURE
+
+  if ((bpm_limits[i].tstamp != 0) &&
+     ((tstamp - bpm_limits[i].tstamp) <= both_exceeded_delay) &&
+     fire_epol(0))
+  {
+    /* max and min limits of bpm violated within 'both_exceeded_delay' 
+     * period ('bx' value). Activate Emergency shipment's policy. */
+    act_emergency();
+    ereason_payload = 1;
+    sched_shipment(0);
+    *bpm_lim_cond_set = 0; // Give up 'bpm_lim_epol_trigg' checking
+    return;
+  }
+
+   /* If 'bx' 'didn't trigger epol, then check out for 'bt' condition,
+    * (again, from downlink payload) */
+
+  if ((((tstamp - *bpm_lim_cond_timestamp) - idle_time) >= bpm_lim_epol_trigg) &&
+      fire_epol(0))
+  {
+    /* Emergency condition kept over 'bpm_lim_epol_trigg' milliseconds.
+    * Activate Emergency shipment's policy. */
+    act_emergency();
+    ereason_payload = 1;
+    sched_shipment(0);
+    *bpm_lim_cond_set = 0; // Reset 'bpm_lim_epol_trigg' checking
   }
 }
+
 
 /* Overloaded function series to check
  * if any limit has been exceeded
  */
 byte check_upper_limit(float temperature) {
-  return (temperature > UPPER_TEMP_LIMIT);
+  return (temperature > utemp_lim);
 }
 
 byte check_lower_limit(float temperature) {
-  return (temperature < LOWER_TEMP_LIMIT);
+  return (temperature < ltemp_lim);
 }
 
 byte check_upper_limit(byte bpm) {
@@ -1463,8 +1525,6 @@ byte check_upper_limit(byte bpm) {
 byte check_lower_limit(byte bpm) {
   return (bpm < lbpm_lim);
 }
-
-
 
 void set_max_and_min(byte bpm, int ibi) {
   if (bpm > max_bpm)
@@ -1489,7 +1549,6 @@ byte bytecast(int value) {
       return (byte)255;
   return byte(value);
 }
-
 
 void loop() {
 
@@ -1526,11 +1585,17 @@ void loop() {
     else ranges[3]++; // bpm > ubpm_lim
 
     // check limits
-    if (check_upper_limit(bpm))
+    if (check_upper_limit(bpm)) {
+      lbpm_lim_cond_set = 0;
       limit_exceeded(UPPER_BPM_MEASURE, bpm);
-    else
+    }
+    else {
+      ubpm_lim_cond_set = 0;
       if (check_lower_limit(bpm))
         limit_exceeded(LOWER_BPM_MEASURE, bpm);
+      else
+        lbpm_lim_cond_set = 0;
+    }
   }
 
   if (sigfox_led_timer->isEnabled())

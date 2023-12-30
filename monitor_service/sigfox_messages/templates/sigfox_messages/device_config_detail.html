@@ -22,21 +22,23 @@
     {% if device %}
       <ul class="list-group mt-3">
         <li class="list-group-item"><strong>Device identifier:</strong> {{ device.dev_id }}</li>
-        <li class="list-group-item"><strong>Higher bpm limit configured:</strong> {{ device.higher_bpm_limit }}</li>
-        <li class="list-group-item"><strong>Lower bpm limit configured:</strong> {{ device.lower_bpm_limit }}</li>
         <li class="list-group-item"><strong>Higher bpm limit configured to trigger emergency:</strong> 
         {{ device.higher_ebpm_limit }}</li>
         <li class="list-group-item"><strong>Lower bpm limit configured to trigger emergency:</strong> 
         {{ device.lower_ebpm_limit }}</li>
+        <li class="list-group-item"><strong>Higher bpm limit configured:</strong> {{ device.higher_bpm_limit }}</li>
+        <li class="list-group-item"><strong>Lower bpm limit configured:</strong> {{ device.lower_bpm_limit }}</li>
+        <li class="list-group-item"><strong>Higher temperature limit configured:</strong> {{ device.max_temp}}</li>
+        <li class="list-group-item"><strong>Lower temperature limit configured:</strong> {{ device.min_temp }}</li>
         <li class="list-group-item"><strong>Bpm limit window* (in seconds):</strong> {{ device.bpm_limit_window }}</li>
-        <li class="list-group-item"><strong>Minimum delay* (in seconds):</strong> {{ device.min_delay }}</li>
+        <li class="list-group-item"><strong>Minimum delay* (in minutes):</strong> {{ device.min_delay }}</li>
       </ul>
       <div class="alert alert-info mt-3">
         <strong>Bpm limit window*: threshold in seconds exceeding a higher or lower bpm limit without triggering an 
         emergency condition</strong>
       </div>
       <div class="alert alert-info mt-3">
-        <strong>Minimum delay*: Minimal delay between configured bpm extremes</strong>
+        <strong>Minimum delay*: Minimal delay for hitting the opposite bpm extreme</strong>
       </div>
 
       {% if request.user.is_staff %}

@@ -567,7 +567,7 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
             pass
         else: # EMERGENCY_SHIP_POLICY
           # We don't have a way to determine how much time the device has been gathering samples since it booted up.
-          # We know 'x' falls within 0<x<=10'30", range, but we don't know it accurately, so we start measuring
+          # We know 'x' falls within 0<x<=10'30" range, but we don't know it accurately, so we start measuring
           # device's computing time from the second message onwards to update the average(s).
           pass
 
@@ -580,7 +580,7 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
           pass # Lack of continuity upon message delivery. Leave fields without updating
       else:
         # We don't have a way to determine how much time the device has been gathering samples since it booted up.
-        # We know 'x' falls within 0<x<=10'30", range, but we don't know it accurately, so we start measuring
+        # We know 'x' falls within 0<x<=10'30" range, but we don't know it accurately, so we start measuring
         # device's computing time from the second message onwards to update the average(s).
         pass
 

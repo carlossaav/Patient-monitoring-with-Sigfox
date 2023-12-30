@@ -1,13 +1,38 @@
+# Message types 
+ALARM_MSG = 0
+LIMITS_MSG = 1
+ALARM_LIMITS_MSG = 2
+ERROR_MSG = 3
+REC_ALARM_MSG = 4
+REC_LIMITS_MSG = 5
+REC_ALARM_LIMITS_MSG = 6
+REPORT_MSG = 7
+
+# Shipment policies
+REGULAR_SHIP_POLICY = 0
+EMERGENCY_SHIP_POLICY = 1
+RECOVERY_SHIP_POLICY = 2
+
 # Number of days to keep patients data,
 # after which all records will be erased from Database.
 KEEP_RECORDS = 10
+
+# Quantity to be added (substracted) to the configured upper (lower)
+# bpm limit to calculate its emergency limit on the device.
+# So for instance, if we have a lower limit of 70 bpm, and this value
+# is set to 10, the lower bpm limit configured to trigger emergency on
+# the device will be set to 60. This setup is thought to save space on
+# downlink payloads, instead of shipping the whole value (5 bits vs 1 byte).
+# Hence, maximum value to be set for them is 31.
+HIGHER_BPM_ELIMIT_SUM = 15
+LOWER_BPM_ELIMIT_SUM = 10
 
 # 22'40" (higher recovery sequence delay plus failed shipment (1 min) plus 
 # delivery delay (40 seconds) from Sigfox Backend)
 MAX_TIME_DELAY = 1360
 
 # Mimimum time to regard a new emergency message as another emergency (in minutes)
-NEW_EMERG_DELAY = 90
+NEW_EMERG_DELAY = 45
 
 # Mimimum time to resend a SMS notification (in minutes)
 SMS_DELAY = 15
@@ -39,25 +64,11 @@ NOTIFICATION_PERIOD = 30
 NOTIFIER_WAIT = 30
 
 # FOR BEST RESULTS ON EMERGENCY ACKNOWLEDGMENT, BEST KEEP 'MAX_NOTIFICATION_TIME'
-# TO A VALUE LOWER THAN 'NEW_EMERG_DELAY'. NOT MANDATORY
+# TO A VALUE LOWER THAN 'NEW_EMERG_DELAY'. NOT MANDATORY.
 # Specify the maximum notification time, in minutes, while the notification process
-# is active without "emergency acknowledgement" for both Telegram and SMS contact systems
-MAX_NOTIFICATION_TIME = 75
+# is active without "emergency acknowledgement" for both Telegram and SMS contact
+# systems.
+MAX_NOTIFICATION_TIME = 30
 
 # Service url, only used for displaying the service url on Telegram notifications.
 SERVICE_URL = "http://127.0.0.1:8000/sigfox_messages"
-
-# Msg types 
-ALARM_MSG = 0
-LIMITS_MSG = 1
-ALARM_LIMITS_MSG = 2
-ERROR_MSG = 3
-REC_ALARM_MSG = 4
-REC_LIMITS_MSG = 5
-REC_ALARM_LIMITS_MSG = 6
-REPORT_MSG = 7
-
-# Shipment policies
-REGULAR_SHIP_POLICY = 0
-EMERGENCY_SHIP_POLICY = 1
-RECOVERY_SHIP_POLICY = 2
