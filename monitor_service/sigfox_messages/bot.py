@@ -414,7 +414,7 @@ async def show_patients(message):
       qs = await utils.async_Patient_Contact_filter(contact=contact)
       exists = await qs.aexists()
       if exists:
-        reply = "Following patients were configured to be monitored on this phone:\n\n"
+        reply = "The following patients were configured to be monitored on this phone:\n\n"
         i = 1
         async for pcontact in qs:
           patient = await utils.async_my_get_attr(pcontact, "patient")
@@ -465,7 +465,7 @@ async def handle_unfollow(message):
     await utils.wrap_bot_reply(message, text=reply)
     return
 
-  reply = "Following patients are currently linked to this phone:\n"
+  reply = "The following patients are currently linked to this phone:\n"
   i = 1
   l = []
   async for pcontact in models.Patient_Contact.objects.filter(contact=contact):

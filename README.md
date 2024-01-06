@@ -114,11 +114,8 @@ Our ArduinoMKRFOX1200 patient monitoring program will deliver messages to the Si
 -  e:r:p:msg:rpv:avb:maxb:minb:maxi:mini                                           (**1**)
 -  e:r:p:msg:rpv:avb:avi:t                                                         (**2**)
 -  e:r:p:msg:rpv:avb:avi:maxi:mini                                                 (**3**)
--  e:r:p:msg:rpv:avb(-1):t (PulseSensor Error, on ERROR_MSG)                       (**4**)
--  e:r:p:msg:rpv:avb:maxb:minb:maxi:mini (Temperature Sensor Error, on ERROR_MSG)  (**5**)
--  e:r:p:msg:rpv:avb:avi:maxi:mini (Temperature Sensor Error, on ERROR_MSG)        (**6**)
--  (original_payload-(last 4 bytes)):x                                             (**7**)
-
+-  e:r:p:msg:rpv:avb(0):t (PulseSensor Error, on ERROR_MSG)                        (**4**)
+-  (original_payload-(last 4 bytes)):x                                             (**5**)
 
 **Notes on control fields**
 

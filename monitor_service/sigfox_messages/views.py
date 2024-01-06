@@ -108,7 +108,7 @@ def uplink(request):
     dev_conf = models.Device_Config.objects.get(dev_id=dev_id)
     patient = models.Patient.objects.get(dev_conf=dev_conf)
   except KeyError:
-    output = "device id or payload data not provided, return 400"
+    output = "device id or payload data not provided"
     print(output)
     return HttpResponseBadRequest(output)
   except models.Device_Config.DoesNotExist: # We can't relate payload data to any patient
@@ -223,7 +223,8 @@ def uplink(request):
     emerg_update = 1
   try:
     ebio = models.Emergency_Biometrics.objects.filter(patient=patient).latest("spawn_timestamp")
-    last_msg_time = models.Device_History.objects.filter(dev_conf=dev_conf).latest("date").last_msg_time
+    last_msg_time = models.Device_History.objects.filter(dev_conf=dev_conf).\
+                    latest("date").last_msg_time
     if emergency:
       # check emergency creation/reactivation
       minutes = int((utils.get_sec_diff(datetime_obj, ebio.spawn_timestamp)) // 60) # Convert it to minutes
@@ -350,7 +351,7 @@ def uplink(request):
     third_range = p[2]
     higher_range = p[3]
 
-    avg_bpm = utils.retrieve_field(bin_data, 40, 8)                    # Average Beats Per Minute
+    avg_bpm = utils.retrieve_field(bin_data, 40, 8)                  # Average Beats Per Minute
     print(f"(uplink) avg_bpm = {avg_bpm}")
     utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None,
                          datetime_obj, shipment_policy)
@@ -360,7 +361,7 @@ def uplink(request):
 
   # Next fields vary depending on which payload_format we're dealing with
 
-  if (payload_format==0 or payload_format==1 or payload_format==5):
+  if (payload_format==0 or payload_format==1):
     max_bpm = utils.retrieve_field(bin_data, 48, 8)                  # Highest record of Beats Per Minute
     print(f"(uplink) max_bpm = {max_bpm}")
     min_bpm = utils.retrieve_field(bin_data, 56, 8)                  # Lowest record of Beats Per Minute
@@ -386,7 +387,7 @@ def uplink(request):
     if emergency:
       utils.update_temp(dev_hist, temp, None, ebio)
 
-  if (payload_format==2 or payload_format==3 or payload_format==6):
+  if (payload_format==2 or payload_format==3):
     avg_ibi = utils.retrieve_field(bin_data, 48, 16)                 # Average InterBeat Interval
     print(f"(uplink) avg_ibi = {avg_ibi}")
     utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, biometrics_24, None,
@@ -395,8 +396,7 @@ def uplink(request):
       utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, None, ebio,
                            datetime_obj, shipment_policy)
 
-  if (payload_format==1 or payload_format==3 or
-      payload_format==5 or payload_format==6):
+  if (payload_format==1 or payload_format==3):
     max_ibi = utils.retrieve_field(bin_data, 64, 16)                 # Highest record of Interbeat interval
     print(f"(uplink) max_ibi = {max_ibi}")
     min_ibi = utils.retrieve_field(bin_data, 80, 16)                 # Lowest record of Interbeat interval
@@ -407,7 +407,7 @@ def uplink(request):
       utils.update_bpm_ibi(dev_hist, "max_ibi", max_ibi, None, ebio)
       utils.update_bpm_ibi(dev_hist, "min_ibi", min_ibi, None, ebio)
 
-  if (payload_format == 7):
+  if (payload_format == 5):
     elapsed_ms = utils.retrieve_field(bin_data, 64, 32)              # Elapsed milliseconds since the recovery message was stored
     print(f"(uplink) elapsed_ms = {elapsed_ms}")
 
@@ -448,9 +448,9 @@ def uplink(request):
   dev_hist.last_dev_state = "Functional"
   if (msg_type == constants.ERROR_MSG):
     if (payload_format == 4):
-      dev_hist.last_dev_state = "Pulse sensor error"
-    else:
-      dev_hist.last_dev_state = "Temperature sensor error"
+      dev_hist.last_dev_state = "PulseSensor error"
+    elif ((payload_format == 1) or (payload_format == 3)):
+      dev_hist.last_dev_state = "MAX30205 error"
 
   dev_hist.save()
   biometrics_24.save()
@@ -867,13 +867,17 @@ def modify_device_config(request, device_id):
       form = forms.ModifyDevice_ConfigForm(request.POST)
       if (form.is_valid()):
         dev_conf.lower_bpm_limit = form.cleaned_data["lower_bpm_limit"]
-        dev_conf.lower_ebpm_limit = dev_conf.lower_bpm_limit - constants.LOWER_BPM_ELIMIT_SUM
         dev_conf.higher_bpm_limit = form.cleaned_data["higher_bpm_limit"]
-        dev_conf.higher_ebpm_limit = dev_conf.higher_bpm_limit + constants.HIGHER_BPM_ELIMIT_SUM
         dev_conf.min_temp = form.cleaned_data["min_temp"]
         dev_conf.max_temp = form.cleaned_data["max_temp"]
-        dev_conf.bpm_limit_window = form.cleaned_data["bpm_limit_window"]
         dev_conf.min_delay = form.cleaned_data["min_delay"]
+        dev_conf.bpm_limit_window = form.cleaned_data["bpm_limit_window"]
+        if (dev_conf.bpm_limit_window == 0):
+          dev_conf.lower_ebpm_limit = dev_conf.lower_bpm_limit
+          dev_conf.higher_ebpm_limit = dev_conf.higher_bpm_limit
+        else:
+          dev_conf.lower_ebpm_limit = dev_conf.lower_bpm_limit - constants.LOWER_BPM_ELIMIT_SUM
+          dev_conf.higher_ebpm_limit = dev_conf.higher_bpm_limit + constants.HIGHER_BPM_ELIMIT_SUM
         dev_conf.save()
         return HttpResponseRedirect("/sigfox_messages/")
 

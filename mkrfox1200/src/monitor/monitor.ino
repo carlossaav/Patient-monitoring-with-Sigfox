@@ -20,6 +20,11 @@
 #define LOWER_BPM_MEASURE 1
 #define LOWER_BPM_LIMIT 65
 
+/* Quantities to to be added/substracted to the UPPER_BPM_LIMIT/LOWER_BPM_LIMIT limits
+ * to set the higher/lower bpm emergency limits */
+#define UPPER_ELIM_ADD 15
+#define LOWER_ELIM_SUB 10
+
 #define UPPER_TEMP_MEASURE 2
 #define UPPER_TEMP_LIMIT 37.5
 #define LOWER_TEMP_MEASURE 3
@@ -96,7 +101,9 @@ unsigned int sum_bpm, sum_ibi;
 
 byte range_top; // Determined by ranges width
 byte ubpm_lim = UPPER_BPM_LIMIT;
+byte ubpm_elim = ubpm_lim + UPPER_ELIM_ADD;
 byte lbpm_lim = LOWER_BPM_LIMIT;
+byte lbpm_elim = lbpm_lim - LOWER_ELIM_SUB;
 
 float utemp_lim = UPPER_TEMP_LIMIT;
 float ltemp_lim = LOWER_TEMP_LIMIT;
@@ -685,9 +692,9 @@ void handle_failed_shipment() {
     // Next setting is possible given the current message type order
     bitSet(rec_matrix[rec_matrix_index][0], 3); // Set message type == REC_X_MSG.
 
-    // Set payload format indicator bits to 7
+    // Set payload format indicator bits to 5
     bitWrite(rec_matrix[rec_matrix_index][1], 5, 1);
-    bitWrite(rec_matrix[rec_matrix_index][2], 2, 1);
+    bitWrite(rec_matrix[rec_matrix_index][2], 2, 0);
     bitWrite(rec_matrix[rec_matrix_index][4], 7, 1);
 
     tstamp = millis();
@@ -762,9 +769,19 @@ void get_downlink(unsigned long delay) {
   // Convert it to milliseconds
   bpm_lim_epol_trigg = (unsigned long)aux * 1000;
 
-  msg = recv_buff[3];      // get amount of uplink messages sent on the day
-  ubpm_lim = recv_buff[4]; // get upper bpm limit
-  lbpm_lim = recv_buff[5]; // get lower bpm limit
+  msg = recv_buff[3];         // get amount of uplink messages sent on the day
+  ubpm_lim = recv_buff[4];    // get upper bpm limit
+  lbpm_lim = recv_buff[5];    // get lower bpm limit
+
+  // Set upper and lower emergeny limits
+  if (bpm_lim_epol_trigg == 0) {
+    ubpm_elim = ubpm_lim;
+    lbpm_elim = lbpm_lim;
+  }
+  else { // default values
+    ubpm_elim = ubpm_lim + UPPER_ELIM_ADD;
+    lbpm_elim = lbpm_lim - LOWER_ELIM_SUB;
+  }
 
   /* Extract max and min temperatures */
 
@@ -810,7 +827,7 @@ void send_measurements() {
   static float temp;
   static unsigned long tstamp, temp_tstamp = 0;
   byte msg_type = REPORT_MSG;
-  byte buff_size, payload_format, code;
+  byte buff_size, code, payload_format=0;
 
   if (ship_attempt++==0) {
     byte i=0;
@@ -843,8 +860,12 @@ void send_measurements() {
 
   /* Set message type */
 
-  if (pulsesensor_err || temp_err)
+  if (pulsesensor_err || temp_err) {
     msg_type = ERROR_MSG;
+    /* Set also payload_format for the error */
+    if (pulsesensor_err) payload_format = 4;
+    else while ((payload_format = random(1, 4))==2); // temp_err -> payload format variants 1/3
+  }
 
   if (limits_exceeded_counter) { // msg_type == REPORT_MSG/ERROR_MSG
     if (msg_type==ERROR_MSG) {
@@ -860,35 +881,38 @@ void send_measurements() {
         msg_type = ALARM_LIMITS_MSG;
         break;
       default: // msg_type == REPORT_MSG/ERROR_MSG
-        msg_type =  ALARM_MSG; // ERROR_MSG lost, prioritize ALARM_MSG messages.
+        /* ERROR_MSG lost, prioritize ALARM_MSG messages */
+        if ((msg_type ==  ERROR_MSG) && limits_exceeded_counter)
+          /* If msg_type hasn't yet been set to LIMITS_MSG on this condition, it's because 
+           * a temperature limit must have been exceeded. Since we were going to report
+           * an ALARM_MSG, mind that limit exceeded too */
+          msg_type = ALARM_LIMITS_MSG;
+        else
+          msg_type =  ALARM_MSG;
     }
   }
 
   /* Calculate payload format indicator (type of payload) */
 
-  if (msg_type == LIMITS_MSG || msg_type == ALARM_LIMITS_MSG) {  // payload format variants == 0/1/2
+  if (payload_format == 0) {  // payload_format hasn't yet been set (msg_type != ERROR_MSG)
+    if (msg_type == LIMITS_MSG || msg_type == ALARM_LIMITS_MSG) {  // payload format variants == 0/1/2
 
-    unsigned int bpm_limits_counter = bpm_limits[0].counter + bpm_limits[1].counter;
+      unsigned int bpm_limits_counter = bpm_limits[0].counter + bpm_limits[1].counter;
 
-    if (bpm_limits_counter != 0) {
-      if (bpm_limits_counter < limits_exceeded_counter) // bpm and temperature limits exceeded on the interval
-        payload_format = 0;
-      else // bpm_limits_counter == limits_exceeded_counter (only bpm measure has been exceeded)
-        payload_format = 1;
+      if (bpm_limits_counter == 0)
+        while ((payload_format = random(3))==1); // only temperature limit exceeded (variants == 0/2)
+      else
+        if (bpm_limits_counter == limits_exceeded_counter) // only bpm measure has been exceeded
+          payload_format = 1;
+        /* else (bpm_limits_counter < limits_exceeded_counter)
+         * both bpm and temperature limits have been exceeded.
+         * Let default payload_format (0) */
     }
-    else while ((payload_format = random(3))==1); // only temperature limit exceeded (variants == 0/2)
-  }
-  else {
-    if (msg_type == REPORT_MSG || msg_type == ALARM_MSG) {
+    else {  // msg_type == REPORT_MSG/ALARM_MSG
       if ((temp_tstamp != 0) && ((millis() - temp_tstamp) < TEMP_MEASURING_DELAY))
         while ((payload_format = random(1, 4))==2); // payload format variants == 1/3
-      else 
-        payload_format = random(4); // payload format variants == 0/1/2/3
-    }
-    else  { // msg_type == ERROR_MSG
-      if (pulsesensor_err) payload_format = 4;
       else
-        payload_format = random(5, 7); // payload format variants == 5/6
+        payload_format = random(4); // payload format variants == 0/1/2/3
     }
   }
 
@@ -913,7 +937,7 @@ void send_measurements() {
       write_dec_to_bin(&(send_buff[0]), 0, 5, 2);
   }
 
-  switch (msg_type) {  // Message type field setting
+  switch (msg_type) {  // "Message type" field setting
     case ALARM_MSG:
       write_dec_to_bin(&(send_buff[0]), 0, 3, 3);
       break;
@@ -1020,7 +1044,7 @@ void send_measurements() {
   send_buff[5] = avg_bpm;
 
   // Write max_bpm and min_bpm on corresponding payloads
-  if (payload_format==0 || payload_format==1 || payload_format==5) {
+  if (payload_format==0 || payload_format==1) {
     send_buff[6] = max_bpm;
     send_buff[7] = min_bpm;
   }
@@ -1043,7 +1067,7 @@ void send_measurements() {
   }
 
   // Write max_ibi and min_ibi on corresponding payloads
-  if (payload_format==1 || payload_format==3 || payload_format==5 || payload_format==6) {
+  if (payload_format==1 || payload_format==3) {
 
     byte *p = (byte *)&max_ibi; // Write max_ibi on bytes [8-9]
     for (int i=(SHIPMENT_BUFFER_SIZE-4), j=(sizeof(max_ibi)-3); i<(SHIPMENT_BUFFER_SIZE-2), j>=0; i++, j--)
@@ -1055,7 +1079,7 @@ void send_measurements() {
   }
 
   // Write avg_ibi on corresponding payloads
-  if (payload_format==2 || payload_format==3 || payload_format==6) {
+  if (payload_format==2 || payload_format==3) {
     byte *p = (byte *)&avg_ibi; // Write avg_ibi on bytes [6-7]
     for (int i=(SHIPMENT_BUFFER_SIZE-6), j=(sizeof(avg_ibi)-3); i<=(SHIPMENT_BUFFER_SIZE-5), j>=0; i++, j--)
       send_buff[i] = p[j]; // Little endian arch
@@ -1382,11 +1406,11 @@ void button_pressed() {
 /* Functions to check if any 
  * elimit has been exceeded */
 byte check_upper_elimit(byte bpm) {
-  return (bpm > (ubpm_lim + 15));
+  return (bpm > ubpm_elim);
 }
 
 byte check_lower_elimit(byte bpm) {
-  return (bpm < (lbpm_lim - 10));
+  return (bpm < lbpm_elim);
 }
 
 
