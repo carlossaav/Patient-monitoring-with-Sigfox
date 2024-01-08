@@ -70,5 +70,13 @@ NOTIFIER_WAIT = 30
 # systems.
 MAX_NOTIFICATION_TIME = 30
 
+# Default coordinates to "Unknown"
+DEFAULT_COORDINATE = "Unknown"
+
+# Device statuses
+FUNCTIONAL_DEV_STATUS = "Functional"
+PULSESENSOR_ERR_DEV_STATUS = "PulseSensor error"
+MAX30205_ERR_DEV_STATUS = "MAX30205 error"
+
 # Service url, only used for displaying the service url on Telegram notifications.
 SERVICE_URL = "http://127.0.0.1:8000/sigfox_messages"

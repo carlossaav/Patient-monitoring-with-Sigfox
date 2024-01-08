@@ -592,9 +592,9 @@ async def send_dev_data(**kwargs):
   contact = kwargs["contact"]
   patient = kwargs["patient"]
 
-  latitude = ""
-  longitude = ""
   loc_avail = 0
+  latitude = constants.DEFAULT_COORDINATE
+  longitude = constants.DEFAULT_COORDINATE
   dev_conf = await async_my_get_attr(patient, "dev_conf")
   dev_hist_qs = await async_Device_History_filter(dev_conf=dev_conf)
   dev_hist = None
@@ -614,7 +614,8 @@ async def send_dev_data(**kwargs):
     message = title_msg + "\nLast message sent: "
     message += str(dev_hist.last_msg_time) + "\nLast known location: "
 
-    if (latitude != "" and longitude != ""):
+    if (latitude != constants.DEFAULT_COORDINATE and
+        longitude != constants.DEFAULT_COORDINATE):
       loc_avail = 1
       message += "(lat:" + latitude + ", long:" + longitude + ")"
     else:

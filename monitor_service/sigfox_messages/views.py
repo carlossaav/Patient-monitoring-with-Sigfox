@@ -32,9 +32,9 @@ def downlink(request, dev_id):
     dev_hist = models.Device_History(dev_conf=dev_conf, date=date,
                                      running_since=datetime_obj,
                                      last_msg_time=datetime_obj,
-                                     last_dev_state="Functional",
-                                     last_known_latitude="Unknown",
-                                     last_known_longitude="Unknown",
+                                     last_dev_state=constants.FUNCTIONAL_DEV_STATUS,
+                                     last_known_latitude=constants.DEFAULT_COORDINATE,
+                                     last_known_longitude=constants.DEFAULT_COORDINATE,
                                      uplink_count=0, downlink_count=0,
                                      higher_bpm_limit=dev_conf.higher_bpm_limit,
                                      lower_bpm_limit=dev_conf.lower_bpm_limit,
@@ -148,9 +148,9 @@ def uplink(request):
     dev_hist = models.Device_History(dev_conf=dev_conf, date=date,
                                      running_since=datetime_obj,
                                      last_msg_time=datetime_obj,
-                                     last_dev_state="Functional",
-                                     last_known_latitude="Unknown",
-                                     last_known_longitude="Unknown",
+                                     last_dev_state=constants.FUNCTIONAL_DEV_STATUS,
+                                     last_known_latitude=constants.DEFAULT_COORDINATE,
+                                     last_known_longitude=constants.DEFAULT_COORDINATE,
                                      uplink_count=0, downlink_count=0,
                                      higher_bpm_limit=dev_conf.higher_bpm_limit,
                                      lower_bpm_limit=dev_conf.lower_bpm_limit,
@@ -445,12 +445,12 @@ def uplink(request):
 
   # Update dev_hist fields
   dev_hist.last_msg_time = datetime_obj
-  dev_hist.last_dev_state = "Functional"
+  dev_hist.last_dev_state = constants.FUNCTIONAL_DEV_STATUS
   if (msg_type == constants.ERROR_MSG):
     if (payload_format == 4):
-      dev_hist.last_dev_state = "PulseSensor error"
+      dev_hist.last_dev_state = constants.PULSESENSOR_ERR_DEV_STATUS
     elif ((payload_format == 1) or (payload_format == 3)):
-      dev_hist.last_dev_state = "MAX30205 error"
+      dev_hist.last_dev_state = constants.MAX30205_ERR_DEV_STATUS
 
   dev_hist.save()
   biometrics_24.save()

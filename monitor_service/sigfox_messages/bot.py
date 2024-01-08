@@ -25,8 +25,7 @@ manager = Manager()
 # Store an asyncio.Lock() for each chat within an Chat_Message_Async_Lock_Store object
 # If asyncio.Lock() locks are stored in data structures like lists, dicts,
 # tuples, then a pickle error will arise when trying to store them.
-chat_message_alock_store = None
-# chat_message_alock_store = manager.Value(Chat_Message_Async_Lock_Store, None)
+chat_message_alock_store = None # Initialized in async do_polling() function
 
 # Share these dictionaries among Telegram's Bot polling process and notifier processes
 contacts_lock = manager.Lock()
@@ -43,17 +42,18 @@ notifier_dict_lock = manager.dict()
 # Notice whether there's a notification task active on a particular chat
 notifier_dict = manager.dict()
 
-# For Bot tasks access to "last_message_lock"
-last_message_alock = asyncio.Lock()
+# asyncio.Lock() to regulate access to "last_message_lock" among Bot tasks
+last_message_alock = None # Initialized in async do_polling() function
 # Shared among all notifier processes and Bot
 last_message_lock = manager.Lock()
 last_message = manager.Value(ctypes.py_object, datetime.now() - utils.message_delta)
 
 # Below is an arrangement with two dicts and their locks to access last chat's message
-# timestamp, to improve performance letting each individual chat having access to its
-# own timestamp, rather than just having one lock for all chats.
-# Acquire this asyncio.Lock() to manage access to "chat_timestamp_lock" among different Bot tasks
-chat_timestamp_bot_alock = asyncio.Lock()
+# timestamp. Letting each individual chat to get access to its own timestamp, we'll
+# improve overall performance compared to a "single lock for all chats" approach.
+
+# Acquire this asyncio.Lock() to manage access to "chat_timestamp_lock" among Bot tasks
+chat_timestamp_bot_alock = None # Initialized in async do_polling() function
 # Store last message timestamp for each chat
 chat_timestamp_lock = manager.Lock()
 # Dict that associates one "last_chat_message lock" to each chat
@@ -724,9 +724,12 @@ def restart_chats():
 
 async def do_polling():
 
-  global chat_message_alock_store
-  chat_message_alock_store = Chat_Message_Async_Lock_Store()
+  global last_message_alock, chat_timestamp_bot_alock, chat_message_alock_store
 
+  last_message_alock = asyncio.Lock()
+  chat_timestamp_bot_alock = asyncio.Lock()
+
+  chat_message_alock_store = Chat_Message_Async_Lock_Store()
   async for contact in models.Contact.objects.all():
     chat_message_alock_store.create_lock(contact.echat_id)
 
