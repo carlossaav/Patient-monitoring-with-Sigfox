@@ -227,7 +227,7 @@ def uplink(request):
                     latest("date").last_msg_time
     if emergency:
       # check emergency creation/reactivation
-      minutes = int((utils.get_sec_diff(datetime_obj, ebio.spawn_timestamp)) // 60) # Convert it to minutes
+      minutes = int((utils.get_sec_diff(datetime_obj, ebio.spawn_timestamp)) // 60)
       if (minutes >= constants.NEW_EMERG_DELAY):
         new_e = 1 # create a new one
         if (ebio.active): # Deactivate emergency
@@ -353,11 +353,14 @@ def uplink(request):
 
     avg_bpm = utils.retrieve_field(bin_data, 40, 8)                  # Average Beats Per Minute
     print(f"(uplink) avg_bpm = {avg_bpm}")
-    utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None,
-                         datetime_obj, shipment_policy)
     if emergency:
+      utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None,
+                           datetime_obj, shipment_policy, ebio.emsg_count)
       utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, None, ebio,
                            datetime_obj, shipment_policy)
+    else:
+      utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None,
+                          datetime_obj, shipment_policy)
 
   # Next fields vary depending on which payload_format we're dealing with
 
@@ -390,11 +393,14 @@ def uplink(request):
   if (payload_format==2 or payload_format==3):
     avg_ibi = utils.retrieve_field(bin_data, 48, 16)                 # Average InterBeat Interval
     print(f"(uplink) avg_ibi = {avg_ibi}")
-    utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, biometrics_24, None,
-                         datetime_obj, shipment_policy)
     if emergency:
+      utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, biometrics_24, None,
+                           datetime_obj, shipment_policy, ebio.emsg_count)
       utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, None, ebio,
                            datetime_obj, shipment_policy)
+    else:
+      utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, biometrics_24, None,
+                          datetime_obj, shipment_policy)
 
   if (payload_format==1 or payload_format==3):
     max_ibi = utils.retrieve_field(bin_data, 64, 16)                 # Highest record of Interbeat interval
@@ -441,7 +447,7 @@ def uplink(request):
                                         second_range=str(second_range),
                                         third_range=str(third_range),
                                         higher_range=str(higher_range),
-                                        temp=str(temp), elapsed_ms=str(elapsed_ms))
+                                        temp=temp, elapsed_ms=elapsed_ms)
 
   # Update dev_hist fields
   dev_hist.last_msg_time = datetime_obj

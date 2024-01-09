@@ -27,7 +27,7 @@ async def send_sms_alert(contact, message):
   from sigfox_messages.bot import vonage_client
 
   if (vonage_client == None):
-    print("Vonage client object equals to None. Skipping SMS shipping")
+    print("Vonage client object equals to None. Skipping SMS shipping", flush=True)
     return
 
   # print(f"Sending SMS to number {contact.phone_number} at: {datetime.now()}", flush=True)
@@ -36,7 +36,7 @@ async def send_sms_alert(contact, message):
   await loop.run_in_executor(None, partial(vonage_client.sms.send_message, d))
   print(f"SMS message sent to number {contact.phone_number} at: {datetime.now()}", flush=True)
   # print(f"Account balance: {vonage_client.account.get_balance()}", flush=True)
-  print()
+  print(flush=True)
 
 
 async def check_sleep(timestamp, message_delay=constants.MESSAGE_DELAY):
@@ -270,7 +270,7 @@ def get_ranges(lower_bpm_limit, higher_bpm_limit, **kwargs):
     third_rvalue =  kwargs["bio"].third_range
     higher_rvalue =  kwargs["bio"].higher_range
   else:
-    print("Missing arguments on get_ranges()")
+    print("Missing arguments on get_ranges()", flush=True)
     return []
 
   aux = (higher_bpm_limit - lower_bpm_limit) // 2 # Floor division
@@ -467,18 +467,18 @@ def update_temp(dev_hist, attr_value, bio_24=None, ebio=None):
     return
 
   # Temperature related attributes are set directly
-  bio.last_temp = str(round(attr_value, 3))
+  bio.last_temp = round(attr_value, 3)
 
   # On the next if, pick up any temperature field to check out that these fields have already
   # been initialized (msg_count > 1, but an ERROR_MSG message due to Temperature sensor error
-  # could have been sent prior to this one, so temperature fields may equal to "")
-  if ((msg_count > 1) and (bio.sum_temp != "")):
-    bio.sum_temp = str(round((float(bio.sum_temp) + attr_value), 3))
-    if (attr_value < float(bio.min_temp)):
+  # could have been sent prior to this one, so temperature fields may equal to NoneType)
+  if ((msg_count > 1) and (bio.sum_temp != None)):
+    bio.sum_temp = round((bio.sum_temp + attr_value), 3)
+    if (attr_value < bio.min_temp):
       bio.min_temp = bio.last_temp
-    elif (attr_value > float(bio.max_temp)):
+    elif (attr_value > bio.max_temp):
       bio.max_temp = bio.last_temp
-    bio.avg_temp = str(round((float(bio.sum_temp)/msg_count), 3))
+    bio.avg_temp = round((bio.sum_temp/msg_count), 3)
   else:
     bio.sum_temp = bio.last_temp
     bio.min_temp = bio.last_temp
@@ -486,17 +486,64 @@ def update_temp(dev_hist, attr_value, bio_24=None, ebio=None):
     bio.avg_temp = bio.last_temp
 
 
-def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_obj=None, shipment_policy=0):
+def update_sum_and_time(bio, msg_count, sum_field, time_field, attr_value,
+                        get_diff=True, **kwargs):
+  if get_diff:
+    err_msg = "Unable to get parameter. Skipping update of sum and time DB fields"
+    if ("datetime_obj" not in kwargs):
+      print(err_msg, flush=True)
+      return
+    if ("last_msg_time" not in kwargs):
+      print(err_msg, flush=True)
+      return
+
+    attr = "avg_" + sum_field[4:]
+    seconds = get_sec_diff(kwargs["datetime_obj"], kwargs["last_msg_time"])
+    if (seconds <= constants.MAX_TIME_DELAY):
+      if ((msg_count > 1) and (getattr(bio, attr) != None)):
+        partial_sum = attr_value * (seconds * 500) # 500 samples per second
+        setattr(bio, sum_field, getattr(bio, sum_field) + partial_sum)
+        setattr(bio, time_field, getattr(bio, time_field) + seconds)
+      else: # First avg_bpm/avg_ibi shipped of the day/emergency
+        setattr(bio, sum_field, attr_value * seconds * 500)
+        setattr(bio, time_field, seconds)
+    else:
+      # Lack of continuity upon message delivery. Leave sum and time fields
+      # without updating (Expected behaviour)
+      pass
+  else: # shipment_policy == constants.REGULAR_SHIP_POLICY (first shipped value of the day)
+    setattr(bio, sum_field, attr_value * 630 * 500)
+    setattr(bio, time_field, 630) # regular shipment interval in seconds
+
+
+def get_yesterday_last_message(dev_hist, date):
+
+  date = delta(date)
+  try:
+    dev_hist = models.Device_History.objects.get(dev_conf=dev_hist.dev_conf, date=date)
+    return dev_hist.last_message, True
+  except models.Device_History.DoesNotExist:
+    print("There's no device history object available from yesterday", flush=True)
+    return 0, False
+
+
+def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None,
+                   datetime_obj=None, shipment_policy=0, emsg_count=0):
 
   bio, msg_count = get_bio(dev_hist, bio_24, ebio)
 
   if (bio == None): # Failed update
+    print("bio object == None. Skipping update", flush=True)
     return
 
   if (datetime_obj != None): # on average updates
     date = datetime_obj.date()
 
-  if ((msg_count > 1) and (getattr(bio, attr) != "")):
+  if ((attr == "avg_bpm") or (attr == "avg_ibi")): # Get DB field names
+    sum_field = "sum_" + attr[4:]
+    time_field = attr[4:] + "_time"
+
+  if ((msg_count > 1) and (getattr(bio, attr) != None)):
     if ((attr == "max_bpm") and (attr_value > bio.max_bpm)):
       bio.max_bpm = attr_value
     elif ((attr == "min_bpm") and (attr_value < bio.min_bpm)):
@@ -506,82 +553,67 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None, datetime_
     elif ((attr == "min_ibi") and (attr_value < bio.min_ibi)):
       bio.min_ibi = attr_value
     elif ((attr == "avg_bpm") or (attr == "avg_ibi")):
-
+      last_msg_time = dev_hist.last_msg_time
       if ((ebio != None) and (dev_hist.uplink_count==1)):
         # (ebio.emsg_count > 1), but it's the first message of the day
-        date = delta(date) # Purpose is getting the time of yesterday's last message
-        try:
-          dev_hist = models.Device_History.objects.get(dev_conf=dev_hist.dev_conf, date=date)
-        except models.Device_History.DoesNotExist:
-          print("There's no device history object created yesterday")
-          return # This should never happen. Catch exception if it does, to continue.
-
-      seconds = get_sec_diff(datetime_obj, dev_hist.last_msg_time)
-      if (seconds <= constants.MAX_TIME_DELAY):
-        sum_field = "sum_" + attr[4:]
-        time_field = attr[4:] + "_time"
-        # print(f"(uplink) attr = {attr}")
-        # print(f"(uplink) attr[4:] = {attr[4:]}")
-        # print(f"(uplink) time_field (attr[4:] + '_time') = {time_field}")
-        partial_sum = attr_value * (seconds * 500) # 500 samples per second
-        # print(f"(uplink) attr_value = {attr_value}")
-        # print(f"(uplink) partial_sum = {partial_sum}")
-        setattr(bio, sum_field, getattr(bio, sum_field) + partial_sum)
-        # print(f"(uplink) bio.sum_field = {getattr(bio, sum_field)}")
-        setattr(bio, time_field, getattr(bio, time_field) + seconds)
-        # print(f"(uplink) bio.time_field = {getattr(bio, time_field)}")
-        setattr(bio, attr, round(getattr(bio, sum_field)/(getattr(bio, time_field) * 500)))
-      else:
-        pass # Lack of continuity upon message delivery. Leave avg_bpm/avg_ibi without updating
+        last_msg_time, succ = get_yesterday_last_message(dev_hist, date)
+        if not succ:
+          return # Should never happen calling that func from this scenario
+      # Update sum and time
+      update_sum_and_time(bio, msg_count, sum_field, time_field, attr_value,
+                          datetime_obj=datetime_obj,
+                          last_msg_time=last_msg_time)
+      setattr(bio, attr, round(getattr(bio, sum_field)/(getattr(bio, time_field) * 500)))
   else:
     # First value of the day/emergency or both
     setattr(bio, attr, attr_value)
-
     if ((attr == "avg_bpm") or (attr == "avg_ibi")):
-      sum_field = "sum_" + attr[4:]
-      time_field = attr[4:] + "_time"
-
-      # Inititialize sum and time fields
       setattr(bio, sum_field, 0)
-      setattr(bio, time_field, 0)
-
+      setattr(bio, time_field, 0)  # Inititialize sum and time fields
       if (bio_24 != None):
-        if (shipment_policy == constants.REGULAR_SHIP_POLICY):
-          setattr(bio, sum_field, attr_value * 630 * 500)
-          setattr(bio, time_field, 630) # regular shipment interval in seconds
+        if (msg_count == 1): # dev_hist.uplink_count == 1 (First message of the day)
+          if (shipment_policy == constants.REGULAR_SHIP_POLICY):
+            update_sum_and_time(bio, msg_count, sum_field, time_field, attr_value,
+                                get_diff=False)
+          else:
+            if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
+              # Check this is not device's first message after booting
+              if (emsg_count <= 1):
+                # First message of the emergency (device's first message after booting).
+                # We don't have a way to determine how  much time the device has been gathering
+                # samples until the emergency was triggered. We know 'x' falls within 0<x<=10'30"
+                # range, but we don't know it accurately, so we start measuring device's computing
+                # time from the second message onwards to update 'sum' and 'time' DB fields.
+                return
 
-        elif (shipment_policy == constants.RECOVERY_SHIP_POLICY):
-          # Former day passed in the midst of a RECOVERY_SHIP_POLICY
-          # We know this because any device's first message is always either within
-          # an EMERGENCY_SHIP_POLICY or a REGULAR_SHIP_POLICY.
-          date = delta(date)
-          try:
-            dev_hist = models.Device_History.objects.get(dev_conf=dev_hist.dev_conf, date=date)
-            seconds = get_sec_diff(datetime_obj, dev_hist.last_msg_time)
-            if (seconds <= constants.MAX_TIME_DELAY):
-              setattr(bio, sum_field, attr_value * seconds * 500)
-              setattr(bio, time_field, seconds)
-            else:
-              pass # Lack of continuity upon message delivery. Leave avg_bpm/avg_ibi without updating
-          except models.Device_History.DoesNotExist:
-            pass
-        else: # EMERGENCY_SHIP_POLICY
-          # We don't have a way to determine how much time the device has been gathering samples since it booted up.
-          # We know 'x' falls within 0<x<=10'30" range, but we don't know it accurately, so we start measuring
-          # device's computing time from the second message onwards to update the average(s).
+            # Former day passed in the midst of a RECOVERY_SHIP_POLICY/EMERGENCY_SHIP_POLICY.
+            # We know this because any device's first message after boot is always either
+            # within an EMERGENCY_SHIP_POLICY or a REGULAR_SHIP_POLICY.
+            last_msg_time, succ = get_yesterday_last_message(dev_hist, date)
+            if not succ:
+              return
+            # Update sum and time
+            update_sum_and_time(bio, msg_count, sum_field, time_field, attr_value,
+                                datetime_obj=datetime_obj,
+                                last_msg_time=last_msg_time)
+        elif (msg_count > 1): # getattr(bio, attr) == None
+          # Thought for situations where PulSeSensor became available again (keep in mind that this
+          # function gets called when the payload format variant != 4). We can't calculate the number
+          # of samples that were gathered since the last message was sent based on elapsed time since
+          # that moment; since PulSeSensor could have become available again at any point in between.
+          # Update sum and time fields on next shipment.
           pass
-
-      elif ((ebio != None) and (dev_hist.uplink_count > 1)): # (ebio.emsg_count == 1)
-        seconds = get_sec_diff(datetime_obj, dev_hist.last_msg_time)
-        if (seconds <= constants.MAX_TIME_DELAY):
-          setattr(bio, sum_field, (attr_value * seconds * 500))
-          setattr(bio, time_field, seconds)
-        else:
-          pass # Lack of continuity upon message delivery. Leave fields without updating
-      else:
-        # We don't have a way to determine how much time the device has been gathering samples since it booted up.
-        # We know 'x' falls within 0<x<=10'30" range, but we don't know it accurately, so we start measuring
-        # device's computing time from the second message onwards to update the average(s).
+      elif ((ebio != None) and (dev_hist.uplink_count > 1)):
+        if (msg_count == 1): # ebio.emsg_count == 1
+          update_sum_and_time(bio, msg_count, sum_field, time_field, attr_value,
+                              datetime_obj=datetime_obj,
+                              last_msg_time=dev_hist.last_msg_time)
+        elif (msg_count > 1): # getattr(bio, attr) == None
+          # Same scenario (PulSeSensor became available again)
+          # Update sum and time fields on next shipment
+          pass
+      else: # ebio != None, but dev_hist.uplink_count == 1
+        # Same situation here ('x' falls within 0<x<=10'30" range)
         pass
 
 

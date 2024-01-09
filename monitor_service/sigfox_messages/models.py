@@ -114,11 +114,11 @@ class Emergency_Biometrics(models.Model):
   higher_range = models.CharField(max_length=5)
   higher_range_sum = models.CharField(max_length=25)
 
-  last_temp = models.CharField(max_length=6)
-  sum_temp = models.CharField(max_length=15)
-  avg_temp = models.CharField(max_length=6)
-  max_temp = models.CharField(max_length=6)
-  min_temp = models.CharField(max_length=6)
+  last_temp = models.FloatField(null=True)
+  sum_temp = models.FloatField(null=True)
+  avg_temp = models.FloatField(null=True)
+  max_temp = models.FloatField(null=True)
+  min_temp = models.FloatField(null=True)
   
   def __str__(self):
     return str(self.spawn_timestamp)
@@ -143,8 +143,8 @@ class Emergency_Payload(models.Model):
   third_range = models.CharField(max_length=5)
   higher_range = models.CharField(max_length=5)
 
-  temp = models.CharField(max_length=15)
-  elapsed_ms = models.CharField(max_length=50)
+  temp = models.FloatField(null=True)
+  elapsed_ms = models.PositiveIntegerField()
 
   def __str__(self):
     return str(self.id)
@@ -182,10 +182,10 @@ class Biometrics(models.Model):
   third_range = models.CharField(max_length=5)
   higher_range = models.CharField(max_length=5)
 
-  last_temp = models.CharField(max_length=6)
-  avg_temp = models.CharField(max_length=6)
-  max_temp = models.CharField(max_length=6)
-  min_temp = models.CharField(max_length=6)
+  last_temp = models.FloatField(null=True)
+  avg_temp = models.FloatField(null=True)
+  max_temp = models.FloatField(null=True)
+  min_temp = models.FloatField(null=True)
 
   last_alarm_time = models.DateTimeField(blank=True, null=True)
   last_limit_time = models.DateTimeField(blank=True, null=True)
@@ -222,11 +222,11 @@ class Biometrics_24(models.Model):
   higher_range = models.CharField(max_length=5)
   higher_range_sum = models.CharField(max_length=25)
 
-  last_temp = models.CharField(max_length=6)
-  sum_temp = models.CharField(max_length=15)
-  avg_temp = models.CharField(max_length=6)
-  max_temp = models.CharField(max_length=6)
-  min_temp = models.CharField(max_length=6)
+  last_temp = models.FloatField(null=True)
+  sum_temp = models.FloatField(null=True)
+  avg_temp = models.FloatField(null=True)
+  max_temp = models.FloatField(null=True)
+  min_temp = models.FloatField(null=True)
 
   last_alarm_time = models.DateTimeField(blank=True, null=True)
   last_limit_time = models.DateTimeField(blank=True, null=True)
