@@ -97,9 +97,9 @@ class Emergency_Biometrics(models.Model):
   ibi_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
 
   avg_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  sum_bpm = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  sum_bpm = models.PositiveIntegerField(validators=[MinValueValidator(0)], null=True)
   avg_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  sum_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  sum_ibi = models.PositiveIntegerField(validators=[MinValueValidator(0)], null=True)
   max_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
   max_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
   min_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
@@ -114,12 +114,13 @@ class Emergency_Biometrics(models.Model):
   higher_range = models.CharField(max_length=5)
   higher_range_sum = models.CharField(max_length=25)
 
+  temp_samples = models.IntegerField(validators=[MinValueValidator(0)], null=True)
   last_temp = models.FloatField(null=True)
   sum_temp = models.FloatField(null=True)
   avg_temp = models.FloatField(null=True)
   max_temp = models.FloatField(null=True)
   min_temp = models.FloatField(null=True)
-  
+
   def __str__(self):
     return str(self.spawn_timestamp)
 
@@ -205,9 +206,9 @@ class Biometrics_24(models.Model):
   ibi_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
 
   avg_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  sum_bpm = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  sum_bpm = models.PositiveIntegerField(validators=[MinValueValidator(0)], null=True)
   avg_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  sum_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  sum_ibi = models.PositiveIntegerField(validators=[MinValueValidator(0)], null=True)
   max_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
   max_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
   min_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
@@ -222,6 +223,7 @@ class Biometrics_24(models.Model):
   higher_range = models.CharField(max_length=5)
   higher_range_sum = models.CharField(max_length=25)
 
+  temp_samples = models.IntegerField(validators=[MinValueValidator(0)], null=True)
   last_temp = models.FloatField(null=True)
   sum_temp = models.FloatField(null=True)
   avg_temp = models.FloatField(null=True)

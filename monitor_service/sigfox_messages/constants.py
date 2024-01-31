@@ -12,10 +12,26 @@ REPORT_MSG = 7
 REGULAR_SHIP_POLICY = 0
 EMERGENCY_SHIP_POLICY = 1
 RECOVERY_SHIP_POLICY = 2
+DEVICE_BOOTED = 3
 
 # Number of days to keep patients data,
 # after which all records will be erased from Database.
 KEEP_RECORDS = 10
+
+# After every shipment, we let the PulseSensorPlayground Library to
+# process patient's heart rate data for this amount of seconds before
+# requesting patient's data again, therefore delaying sample gathering
+# for such amount of time.
+MIN_PROCESSING_TIME = 5
+
+# Time in seconds that the device takes to complete the Sigfox's Library
+# 'send()' function on the device for uplink/downlink messagess, which
+# substract computing time to process samples on every interval. Whenever
+# a downlink message is sent, usually on the first message of the device
+# after booting, an uplink is also sent, so both delays take place in such
+# case (UPLINK_DELAY + DOWNLINK_DELAY).
+UPLINK_DELAY = 8
+DOWNLINK_DELAY = 30
 
 # Quantity to be added (substracted) to the configured upper (lower)
 # bpm limit to calculate its emergency limit on the device.
@@ -30,6 +46,9 @@ LOWER_BPM_ELIMIT_SUM = 10
 # 22'40" (higher recovery sequence delay plus failed shipment (1 min) plus 
 # delivery delay (40 seconds) from Sigfox Backend)
 MAX_TIME_DELAY = 1360
+
+# Regular interval duration (REGULAR_SHIP_POLICY shipment rate)
+REGULAR_INTERVAL_DURATION = 630 # in seconds
 
 # Mimimum time to regard a new emergency message as another emergency (in minutes)
 NEW_EMERG_DELAY = 45

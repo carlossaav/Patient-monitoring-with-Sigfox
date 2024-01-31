@@ -35,8 +35,8 @@
 
 #define PULSE_THRESHOLD 2150  // Determine which Signal to "count as a beat" and which to ignore
 
-#define UPPER_BPM_LIMIT 135
-#define LOWER_BPM_LIMIT 55
+#define UPPER_BPM_LIMIT 115
+#define LOWER_BPM_LIMIT 68
 #define UPPER_IBI_LIMIT 1000
 #define LOWER_IBI_LIMIT 500
 #define UPPER_TEMP_LIMIT 37.5
@@ -188,7 +188,7 @@ void flash_led(int led) {
 }
 
 void set_range_top() {
-  byte aux = (byte)floor((UPPER_BPM_LIMIT - lbpm_lim)/2);
+  byte aux = (byte)floor((ubpm_lim - lbpm_lim)/2);
   range_top = lbpm_lim + aux;
   if (((ubpm_lim - lbpm_lim) % 2) == 0) // even number
     range_top--;
@@ -360,11 +360,11 @@ void handle_button_pushed() {
  * limit has been exceeded */
 
 byte check_upper_limit(byte bpm) {
-  return (bpm > UPPER_BPM_LIMIT);
+  return (bpm > ubpm_lim);
 }
 
 byte check_lower_limit(byte bpm) {
-  return (bpm < LOWER_BPM_LIMIT);
+  return (bpm < lbpm_lim);
 }
 
 byte check_upper_limit(int ibi) {
@@ -404,11 +404,11 @@ void loop() {
 
   /* See if a sample is ready from the PulseSensor.
    *
-   * If USE_INTERRUPTS is true, the PulseSensor Playground
+   * If USE_ARDUINO_INTERRUPTS is true, the PulseSensor Playground
    * will automatically read and process samples from
    * the PulseSensor.
    *
-   * If USE_INTERRUPTS is false, this call to sawNewSample()
+   * If USE_ARDUINO_INTERRUPTS is false, this call to sawNewSample()
    * will, if enough time has passed, read and process a
    * sample (analog voltage) from the PulseSensor. */
 
@@ -444,7 +444,7 @@ void loop() {
 
     /* Double checking match relies on values set by constants UPPER_BPM_LIMIT, etc.
      * i.e. even if only one measure limit is exceeded, it's likely that the other
-     * measurment of the pair also does (max_bpm-min_ibi, min_bpm-max_ibi). */
+     * measurement of the pair also does (max_bpm-min_ibi, min_bpm-max_ibi). */
 
     if (check_upper_limit(bpm)) {
       limits_exceeded_counter++;
@@ -636,14 +636,12 @@ void loop() {
       Serial.println(bpm_ibi_sample_counter);
       Serial.println("End of story. Bye bye.");
       rtc.standbyMode();
-      while (1)
-        ;
+      while (1);
     }
 
     if (iround == MAX_ROUNDS) {
       Serial.println("We've got to maximum round. Restart the program to continue sampling.");
-      while (1)
-        ;
+      while (1);
     }
 
     rtc.setAlarmSeconds((rtc.getSeconds() + 5) % 60);

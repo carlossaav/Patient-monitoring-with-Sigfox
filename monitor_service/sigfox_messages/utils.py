@@ -297,7 +297,7 @@ def check_emergency_deactivation(emergency, datetime_obj):
     print(emergency, flush=True)
     emergency.active = False  # Deactivate emergency
     emergency.termination_timestamp = models.Device_History.objects.filter(dev_conf=emergency.patient.dev_conf).\
-                                      latest("date").last_msg_time
+                                         latest("date").last_msg_time
     emergency.save()
 
   return emergency
@@ -461,59 +461,27 @@ def update_ranges(dev_hist, attr, attr_value, bio_24=None, ebio=None):
 
 def update_temp(dev_hist, attr_value, bio_24=None, ebio=None):
 
-  bio, msg_count = get_bio(dev_hist, bio_24, ebio)
+  bio, _ = get_bio(dev_hist, bio_24, ebio)
 
   if (bio == None): # Failed update
     return
 
-  # Temperature related attributes are set directly
   bio.last_temp = round(attr_value, 3)
 
-  # On the next if, pick up any temperature field to check out that these fields have already
-  # been initialized (msg_count > 1, but an ERROR_MSG message due to Temperature sensor error
-  # could have been sent prior to this one, so temperature fields may equal to NoneType)
-  if ((msg_count > 1) and (bio.sum_temp != None)):
-    bio.sum_temp = round((bio.sum_temp + attr_value), 3)
-    if (attr_value < bio.min_temp):
-      bio.min_temp = bio.last_temp
-    elif (attr_value > bio.max_temp):
-      bio.max_temp = bio.last_temp
-    bio.avg_temp = round((bio.sum_temp/msg_count), 3)
-  else:
+  if (bio.temp_samples == None): # No temperature sample has been sent yet
+    bio.temp_samples = 1
     bio.sum_temp = bio.last_temp
+    bio.avg_temp = bio.last_temp
     bio.min_temp = bio.last_temp
     bio.max_temp = bio.last_temp
-    bio.avg_temp = bio.last_temp
-
-
-def update_sum_and_time(bio, msg_count, sum_field, time_field, attr_value,
-                        get_diff=True, **kwargs):
-  if get_diff:
-    err_msg = "Unable to get parameter. Skipping update of sum and time DB fields"
-    if ("datetime_obj" not in kwargs):
-      print(err_msg, flush=True)
-      return
-    if ("last_msg_time" not in kwargs):
-      print(err_msg, flush=True)
-      return
-
-    attr = "avg_" + sum_field[4:]
-    seconds = get_sec_diff(kwargs["datetime_obj"], kwargs["last_msg_time"])
-    if (seconds <= constants.MAX_TIME_DELAY):
-      if ((msg_count > 1) and (getattr(bio, attr) != None)):
-        partial_sum = attr_value * (seconds * 500) # 500 samples per second
-        setattr(bio, sum_field, getattr(bio, sum_field) + partial_sum)
-        setattr(bio, time_field, getattr(bio, time_field) + seconds)
-      else: # First avg_bpm/avg_ibi shipped of the day/emergency
-        setattr(bio, sum_field, attr_value * seconds * 500)
-        setattr(bio, time_field, seconds)
-    else:
-      # Lack of continuity upon message delivery. Leave sum and time fields
-      # without updating (Expected behaviour)
-      pass
-  else: # shipment_policy == constants.REGULAR_SHIP_POLICY (first shipped value of the day)
-    setattr(bio, sum_field, attr_value * 630 * 500)
-    setattr(bio, time_field, 630) # regular shipment interval in seconds
+  else:
+    bio.temp_samples += 1
+    bio.sum_temp += bio.last_temp
+    bio.avg_temp = round(bio.sum_temp/bio.temp_samples, 3)
+    if (bio.last_temp < bio.min_temp):
+      bio.min_temp = bio.last_temp
+    elif (bio.last_temp > bio.max_temp):
+      bio.max_temp = bio.last_temp
 
 
 def get_yesterday_last_message(dev_hist, date):
@@ -527,8 +495,57 @@ def get_yesterday_last_message(dev_hist, date):
     return 0, False
 
 
+def update_sum_and_time(get_diff=True, was_yesterday=False, **kwargs):
+
+  try:
+    bio = kwargs["bio"]
+    attr = kwargs["attr"]
+    attr_value = kwargs["attr_value"]
+    sum_field = kwargs["sum_field"]
+    time_field = kwargs["time_field"]
+    msg_count = kwargs["msg_count"]
+    dev_hist = kwargs["dev_hist"]
+    if get_diff:
+      datetime_obj = kwargs["datetime_obj"]
+  except KeyError:
+    print("Unable to get all parameters. Skipping update of sum and time DB fields",
+          flush=True)
+    return
+  except TypeError:
+    print("kwargs not provided or it's not a dictionary", flush=True)
+    return
+
+  if get_diff:
+    if was_yesterday:
+      last_msg_time, succ = get_yesterday_last_message(dev_hist, datetime_obj.date())
+      if not succ:
+        return # Leave sum and time fields without updating
+    else:
+      last_msg_time = dev_hist.last_msg_time
+
+    seconds = get_sec_diff(datetime_obj, last_msg_time)
+    if (seconds <= constants.MAX_TIME_DELAY):
+      seconds -= (constants.UPLINK_DELAY + constants.MIN_PROCESSING_TIME)
+      if (seconds <= 0):
+        return
+    else:
+      # Lack of continuity upon message delivery. Skip update (Expected behaviour)
+      return
+  else:
+    # First shipped message after booting (shipment_policy == constants.DEVICE_BOOTED)
+    seconds = constants.REGULAR_INTERVAL_DURATION - constants.MIN_PROCESSING_TIME
+
+  partial_sum = attr_value * seconds * 500  # 500 samples per second
+  if ((msg_count > 1) and (getattr(bio, attr) != None)):
+    setattr(bio, sum_field, getattr(bio, sum_field) + partial_sum)
+    setattr(bio, time_field, getattr(bio, time_field) + seconds)
+  else: # First avg_bpm/avg_ibi shipped of the day/emergency
+    setattr(bio, sum_field, partial_sum)
+    setattr(bio, time_field, seconds)
+
+
 def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None,
-                   datetime_obj=None, shipment_policy=0, emsg_count=0):
+                   datetime_obj=None, shipment_policy=0):
 
   bio, msg_count = get_bio(dev_hist, bio_24, ebio)
 
@@ -536,12 +553,32 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None,
     print("bio object == None. Skipping update", flush=True)
     return
 
-  if (datetime_obj != None): # on average updates
-    date = datetime_obj.date()
-
   if ((attr == "avg_bpm") or (attr == "avg_ibi")): # Get DB field names
+    if (datetime_obj == None):
+      print("Missing datetime_obj to update sum and time DB fields.", end=' ', flush=True)
+      print("Skipping average update", flush=True)
+      return
     sum_field = "sum_" + attr[4:]
     time_field = attr[4:] + "_time"
+    params_dict = {'bio': bio,   # keyword arguments for update_sum_and_time() function
+                   'attr': attr,
+                   'attr_value': attr_value,
+                   'sum_field': sum_field,
+                   'time_field': time_field,
+                   'msg_count': msg_count,
+                   'dev_hist': dev_hist,
+                   'datetime_obj': datetime_obj}
+
+    if ((bio_24 != None) and (shipment_policy == constants.DEVICE_BOOTED)):
+      # First message sent of the device after booting, which sets up this
+      # policy when there's no emergency --> Regular interval of
+      # constants.REGULAR_INTERVAL_DURATION seconds
+      update_sum_and_time(get_diff=False, **params_dict)
+      if (dev_hist.uplink_count == 1): # First message of the day
+        setattr(bio_24, attr, attr_value) # Set shipped average
+      elif (dev_hist.uplink_count > 1):
+        setattr(bio_24, attr, round(getattr(bio_24, sum_field)/(getattr(bio_24, time_field) * 500)))
+      return
 
   if ((msg_count > 1) and (getattr(bio, attr) != None)):
     if ((attr == "max_bpm") and (attr_value > bio.max_bpm)):
@@ -553,17 +590,15 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None,
     elif ((attr == "min_ibi") and (attr_value < bio.min_ibi)):
       bio.min_ibi = attr_value
     elif ((attr == "avg_bpm") or (attr == "avg_ibi")):
-      last_msg_time = dev_hist.last_msg_time
       if ((ebio != None) and (dev_hist.uplink_count==1)):
         # (ebio.emsg_count > 1), but it's the first message of the day
-        last_msg_time, succ = get_yesterday_last_message(dev_hist, date)
-        if not succ:
-          return # Should never happen calling that func from this scenario
-      # Update sum and time
-      update_sum_and_time(bio, msg_count, sum_field, time_field, attr_value,
-                          datetime_obj=datetime_obj,
-                          last_msg_time=last_msg_time)
-      setattr(bio, attr, round(getattr(bio, sum_field)/(getattr(bio, time_field) * 500)))
+        update_sum_and_time(was_yesterday=True, **params_dict)
+      elif (dev_hist.uplink_count > 1):
+        update_sum_and_time(**params_dict)
+      else:
+        return # dev_hist.uplink_count == 0. Never happens. Just to ease code readability
+      setattr(bio, attr,
+              round(getattr(bio, sum_field)/(getattr(bio, time_field) * 500)))
   else:
     # First value of the day/emergency or both
     setattr(bio, attr, attr_value)
@@ -572,30 +607,10 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None,
       setattr(bio, time_field, 0)  # Inititialize sum and time fields
       if (bio_24 != None):
         if (msg_count == 1): # dev_hist.uplink_count == 1 (First message of the day)
-          if (shipment_policy == constants.REGULAR_SHIP_POLICY):
-            update_sum_and_time(bio, msg_count, sum_field, time_field, attr_value,
-                                get_diff=False)
-          else:
-            if (shipment_policy == constants.EMERGENCY_SHIP_POLICY):
-              # Check this is not device's first message after booting
-              if (emsg_count <= 1):
-                # First message of the emergency (device's first message after booting).
-                # We don't have a way to determine how  much time the device has been gathering
-                # samples until the emergency was triggered. We know 'x' falls within 0<x<=10'30"
-                # range, but we don't know it accurately, so we start measuring device's computing
-                # time from the second message onwards to update 'sum' and 'time' DB fields.
-                return
-
-            # Former day passed in the midst of a RECOVERY_SHIP_POLICY/EMERGENCY_SHIP_POLICY.
-            # We know this because any device's first message after boot is always either
-            # within an EMERGENCY_SHIP_POLICY or a REGULAR_SHIP_POLICY.
-            last_msg_time, succ = get_yesterday_last_message(dev_hist, date)
-            if not succ:
-              return
-            # Update sum and time
-            update_sum_and_time(bio, msg_count, sum_field, time_field, attr_value,
-                                datetime_obj=datetime_obj,
-                                last_msg_time=last_msg_time)
+          # For EMERGENCY AND RECOVERY SHIPMENT POLICIES, we can only compute sum and time
+          # fields if this message is a part of a recently triggered sequence of shipments, 
+          # which started out yesterday, since this is the first message of the day.
+          update_sum_and_time(was_yesterday=True, **params_dict)
         elif (msg_count > 1): # getattr(bio, attr) == None
           # Thought for situations where PulSeSensor became available again (keep in mind that this
           # function gets called when the payload format variant != 4). We can't calculate the number
@@ -603,18 +618,16 @@ def update_bpm_ibi(dev_hist, attr, attr_value, bio_24=None, ebio=None,
           # that moment; since PulSeSensor could have become available again at any point in between.
           # Update sum and time fields on next shipment.
           pass
-      elif ((ebio != None) and (dev_hist.uplink_count > 1)):
+      elif (ebio != None):
         if (msg_count == 1): # ebio.emsg_count == 1
-          update_sum_and_time(bio, msg_count, sum_field, time_field, attr_value,
-                              datetime_obj=datetime_obj,
-                              last_msg_time=dev_hist.last_msg_time)
+          if (dev_hist.uplink_count == 1):
+            update_sum_and_time(was_yesterday=True, **params_dict)
+          elif (dev_hist.uplink_count > 1):
+            update_sum_and_time(**params_dict)
         elif (msg_count > 1): # getattr(bio, attr) == None
           # Same scenario (PulSeSensor became available again)
           # Update sum and time fields on next shipment
           pass
-      else: # ebio != None, but dev_hist.uplink_count == 1
-        # Same situation here ('x' falls within 0<x<=10'30" range)
-        pass
 
 
 async def send_dev_data(**kwargs):

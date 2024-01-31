@@ -190,13 +190,15 @@ def uplink(request):
   if new_bio_24: # Following payload data will "reset" Biometrics_24 (first payload to write on it)
     biometrics_24 = models.Biometrics_24(patient=patient)
 
-  # Process the payload, update related fields on tables (following Uplink Payload Formats are defined in Readme.md)
+  # Process the payload, update related fields on tables (following Uplink Payload Formats are defined
+  # in Readme.md)
   # print(f"(uplink) payload = {payload}")
   bin_data = bin(int(payload, 16))[2:]
 
   # print(f"(uplink) bin_data (before) = {bin_data}")
-
-  if (len(bin_data) <= 80):
+  if (len(bin_data) <= 48):
+    bin_data = bin_data.zfill(48) # 6-byte packet
+  elif (len(bin_data) <= 80):
     bin_data = bin_data.zfill(80) # 10-byte packet
   else:
     bin_data = bin_data.zfill(96) # 12-byte packet
@@ -353,14 +355,11 @@ def uplink(request):
 
     avg_bpm = utils.retrieve_field(bin_data, 40, 8)                  # Average Beats Per Minute
     print(f"(uplink) avg_bpm = {avg_bpm}")
+    utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None,
+                         datetime_obj, shipment_policy)
     if emergency:
-      utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None,
-                           datetime_obj, shipment_policy, ebio.emsg_count)
       utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, None, ebio,
                            datetime_obj, shipment_policy)
-    else:
-      utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None,
-                          datetime_obj, shipment_policy)
 
   # Next fields vary depending on which payload_format we're dealing with
 
@@ -379,28 +378,30 @@ def uplink(request):
         (min_bpm < dev_conf.lower_ebpm_limit)):
       biometrics_24.last_elimit_time = datetime_obj
 
-  if (payload_format==0 or payload_format==2 or payload_format==4):
-    if payload_format == 4: # 10 byte packet
-      temp = utils.retrieve_temp(bin_data, 48, 32)                    # Retrieve Temperature
-      print(f"(uplink) temp = {temp}")
+  if (payload_format==0 or payload_format==2 or payload_format==4):  # Retrieve Temperature
+    update_temp = 1
+    if (payload_format == 4):
+      if (len(bin_data) == 80): # 10-byte packet
+        temp = utils.retrieve_temp(bin_data, 48, 32)
+      else:
+        update_temp = 0 # Temperature not included on payload (6-byte packet)
     else:
       temp = utils.retrieve_temp(bin_data, 64, 32)
+
+    if update_temp:
       print(f"(uplink) temp = {temp}")
-    utils.update_temp(dev_hist, temp, biometrics_24, None)
-    if emergency:
-      utils.update_temp(dev_hist, temp, None, ebio)
+      utils.update_temp(dev_hist, temp, biometrics_24, None)
+      if emergency:
+        utils.update_temp(dev_hist, temp, None, ebio)
 
   if (payload_format==2 or payload_format==3):
     avg_ibi = utils.retrieve_field(bin_data, 48, 16)                 # Average InterBeat Interval
     print(f"(uplink) avg_ibi = {avg_ibi}")
+    utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, biometrics_24, None,
+                         datetime_obj, shipment_policy)
     if emergency:
-      utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, biometrics_24, None,
-                           datetime_obj, shipment_policy, ebio.emsg_count)
       utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, None, ebio,
                            datetime_obj, shipment_policy)
-    else:
-      utils.update_bpm_ibi(dev_hist, "avg_ibi", avg_ibi, biometrics_24, None,
-                          datetime_obj, shipment_policy)
 
   if (payload_format==1 or payload_format==3):
     max_ibi = utils.retrieve_field(bin_data, 64, 16)                 # Highest record of Interbeat interval
@@ -452,11 +453,11 @@ def uplink(request):
   # Update dev_hist fields
   dev_hist.last_msg_time = datetime_obj
   dev_hist.last_dev_state = constants.FUNCTIONAL_DEV_STATUS
-  if (msg_type == constants.ERROR_MSG):
-    if (payload_format == 4):
-      dev_hist.last_dev_state = constants.PULSESENSOR_ERR_DEV_STATUS
-    elif ((payload_format == 1) or (payload_format == 3)):
-      dev_hist.last_dev_state = constants.MAX30205_ERR_DEV_STATUS
+  if (payload_format == 4):
+    dev_hist.last_dev_state = constants.PULSESENSOR_ERR_DEV_STATUS
+  elif ((msg_type == constants.ERROR_MSG) and
+        ((payload_format == 1) or (payload_format == 3))):
+    dev_hist.last_dev_state = constants.MAX30205_ERR_DEV_STATUS
 
   dev_hist.save()
   biometrics_24.save()

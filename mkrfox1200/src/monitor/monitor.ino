@@ -75,7 +75,7 @@
 
 /* Every call to getBeatsPerMinute() and getInterBeatIntervalMs()
  * on loop() function takes place every 2 milliseconds --> Sample rate of 2 ms */
-#define LOOP_DELAY 2
+#define SAMPLING_RATE 2
 
 // Default values on Temperature or PulseSensor errors
 #define BPM_READING_ERR 0  // Must be positive number or zero
@@ -91,6 +91,11 @@
 
 #define MAX_RECOVERY_MSG 30 // IMPORTANT, DO NOT SET THIS VALUE HIGHER THAN 255.
 #define MAX_RECOVERY_TIME 21600000 // 6 hours
+
+/* Minumum time in microseconds until retrieving again bpm and ibi values  
+ * from PulseSensorPlayground for further checking. If it's modified here,
+ * must also be done in constants.py from Monitor Service. */
+#define MIN_PROCESSING_TIME 5000000
 
 /** Variables **/
 
@@ -147,7 +152,6 @@ unsigned long bpm_lim_epol_trigg = BPM_LIM_EPOL_TRIGGERING;
 
 // Time to reach the opposite bpm limit again
 unsigned long both_exceeded_delay = BOTH_LIMITS_EXCEEDED_DELAY;
-
 
 /* Counters */
 int msg = 0; // sent messages
@@ -239,6 +243,12 @@ TimerObject *sigfox_led_timer = new TimerObject((unsigned long int)BUG_FLASH, &f
 TimerObject *sensors_led_timer = new TimerObject((unsigned long int)BUG_FLASH, &flash_sensors_led);
 TimerObject *eled_timer = new TimerObject((unsigned long int)EMERG_FLASH, &flash_emergency_led);
 
+/* Variables used to keep continuity on calls to pulseSensor.sawNewSample(), 
+ * which is necessary for correct PulseSensorPlayground measurement of bpm
+ * and ibi variables. */
+byte let_process;
+unsigned long init_process_tstamp;
+unsigned long last_pulse_call = 0;
 
 void setup() {
 
@@ -256,6 +266,13 @@ void setup() {
   digitalWrite(EMERGENCY_LED, LOW);
 
   attachInterrupt(digitalPinToInterrupt(INPUT_BUTTON_PIN), button_pressed, FALLING);
+
+  rtc.begin();
+  rtc.setTime(0, 0, 1); // Initially assume it's 00:00:01 h
+
+  rtc.setAlarmTime(0, 0, 0); // Set alarm at 00:00:00 h
+  rtc.enableAlarm(rtc.MATCH_HHMMSS);
+  rtc.attachInterrupt(reset_day);
 
   set_range_top();
   set_rec_seqs();
@@ -292,30 +309,32 @@ void setup() {
   pulseSensor.setThreshold(PULSE_THRESHOLD);
   pulseSensor.blinkOnPulse(SENSORS_LED);  // blink SENSORS_LED with every heartbeat
 
-  /* Checking sensors... */
-
   disable_timer(sensor_check_timer);
   disable_timer(sensors_led_timer);
+
+  /* Checking sensors... */
+
+  if (!tempSensor.scanAvailableSensors())
+    temp_err = 1;
 
   if (!pulseSensor.begin()) {
     pulsesensor_err = 1;
     pulsesensor_check();  // Initiate regular PulseSensor checking on error
   }
-
-  if (!tempSensor.scanAvailableSensors())
-    temp_err = 1;
+  else let_process_samples();
 
   if (pulsesensor_err || temp_err)
     flash_sensors_led();
 
-  rtc.begin();
-  rtc.setTime(0, 0, 1); // Initially assume it's 00:00:01 h
+  sched_shipment(SHIPMENT_INTERVAL); // Set initial shipment logic to REGULAR_SHIPMENT_POLICY
+}
 
-  rtc.setAlarmTime(0, 0, 0); // Set alarm at 00:00:00 h
-  rtc.enableAlarm(rtc.MATCH_HHMMSS);
-  rtc.attachInterrupt(reset_day);
 
-  sched_shipment(SHIPMENT_INTERVAL);
+/* Wait MIN_PROCESSING_TIME microseconds to start getting bpm and ibi
+ * measures again from PulseSensorPlayground */
+void let_process_samples() {
+  let_process = 1;
+  init_process_tstamp = micros();
 }
 
 
@@ -432,6 +451,7 @@ void pulsesensor_check() {
     }
   }
   pulsesensor_err = 0;
+  let_process_samples();
   disable_timer(sensor_check_timer);
 }
 
@@ -827,28 +847,29 @@ void send_measurements() {
   static float temp;
   static unsigned long tstamp, temp_tstamp = 0;
   byte msg_type = REPORT_MSG;
-  byte buff_size, code, payload_format=0;
+  byte code, temp_read=0, payload_format=0;
+  byte buff_size = SHIPMENT_BUFFER_SIZE;
 
   if (ship_attempt++==0) {
     byte i=0;
 
     tstamp = millis();
     ship_timer->Stop();
-
+    temp = TEMP_READING_ERR; // Set default value
     while (temp_err) {
-      if (++i==2) {
-        temp = TEMP_READING_ERR; // Set temp value to TEMP_READING_ERR to indicate failure
-        break;
-      }
       if (tempSensor.scanAvailableSensors())
         temp_err = 0; // Temperature sensor detected
+      if (++i==5) break;
     }
 
-    if (!temp_err) {
+    if ((!temp_err) &&
+       ((temp_tstamp == 0) || ((tstamp - temp_tstamp) >= TEMP_MEASURING_DELAY)))
+    {
       tempSensor.begin();
       temp = tempSensor.getTemperature();
-      temp_tstamp = millis();
+      temp_tstamp = tstamp;
       tempSensor.shutdown();
+      temp_read = 1;
 
       if (check_upper_limit(temp))
         limit_exceeded(UPPER_TEMP_MEASURE, 0);
@@ -909,10 +930,10 @@ void send_measurements() {
          * Let default payload_format (0) */
     }
     else {  // msg_type == REPORT_MSG/ALARM_MSG
-      if ((temp_tstamp != 0) && ((millis() - temp_tstamp) < TEMP_MEASURING_DELAY))
-        while ((payload_format = random(1, 4))==2); // payload format variants == 1/3
-      else
+      if (temp_read)
         payload_format = random(4); // payload format variants == 0/1/2/3
+      else
+        while ((payload_format = random(1, 4))==2); // payload format variants == 1/3
     }
   }
 
@@ -925,7 +946,7 @@ void send_measurements() {
   bitWrite(send_buff[4], 7, bitRead(payload_format, 0));
 
   /* Setting first 7 bits of the payload...*/
-  
+
   bitWrite(send_buff[0], 7, emergency_active()); // emergency field
   bitWrite(send_buff[0], 6, ereason_payload);    // emergency reason payload field
 
@@ -933,8 +954,18 @@ void send_measurements() {
   if (epol_active()) write_dec_to_bin(&(send_buff[0]), 1, 5, 2);
   else {
     if (rpol_active()) write_dec_to_bin(&(send_buff[0]), 2, 5, 2);
-    else // Regular shipment rate
-      write_dec_to_bin(&(send_buff[0]), 0, 5, 2);
+    else { // Regular shipment rate
+      if (msg > 0)
+        write_dec_to_bin(&(send_buff[0]), 0, 5, 2);
+      else
+      /* Indicate this is the first message sent after booting by setting shipment
+       * policy to value 3. For calculations on the service based on device's
+       * computing time after booting. Only in case there's no emergency shipment
+       * policy active, when it happens to be impossible to calculate such time
+       * assuming current information provided in uplink payloads. Recovery
+       * shipment policy never is active on device's first shipment. */
+        write_dec_to_bin(&(send_buff[0]), 3, 5, 2);
+    }
   }
 
   switch (msg_type) {  // "Message type" field setting
@@ -1054,16 +1085,23 @@ void send_measurements() {
     byte init_pos, end_pos;
     byte *p = (byte *)&temp;
 
-    if (payload_format==4) {  // Write temp on bytes [6-9]. 10 byte packet !!
-      end_pos = SHIPMENT_BUFFER_SIZE - 3;
-      init_pos = SHIPMENT_BUFFER_SIZE - 6;
+    if (payload_format == 4) {
+      if (temp_read) { // Write temp on bytes [6-9]. 10-byte packet!
+        buff_size = 10;
+        end_pos = SHIPMENT_BUFFER_SIZE - 3;
+        init_pos = SHIPMENT_BUFFER_SIZE - 6;
+      }
+      else buff_size = 6; // Temperature not included -> 6-byte packet!
     }
-    else  {  // Write temp on bytes [8-11]
+    else  {  // payload_format==0/2 (temp_read == 1). Write temp on bytes [8-11]
       end_pos = SHIPMENT_BUFFER_SIZE - 1;
       init_pos = SHIPMENT_BUFFER_SIZE - 4;
     }
-    for (int i=init_pos, j=(sizeof(temp)-1); i<=end_pos, j>=0; i++, j--)
-      send_buff[i] = p[j]; // Little endian arch
+
+    if (temp_read) {
+      for (int i=init_pos, j=(sizeof(temp)-1); i<=end_pos, j>=0; i++, j--)
+        send_buff[i] = p[j]; // Little endian arch
+    }
   }
 
   // Write max_ibi and min_ibi on corresponding payloads
@@ -1107,15 +1145,11 @@ void send_measurements() {
 
   /* Shipping... */
 
-  buff_size = SHIPMENT_BUFFER_SIZE;
-  if (payload_format == 4)  // 10 byte-packet
-    buff_size = 10;
-
   SigFox.beginPacket();
   SigFox.write(send_buff, buff_size);
 
-  if (!downlink_done) code = SigFox.endPacket(true);  // Set Downlink Request by passing true to endPacket()
-  else code = SigFox.endPacket();
+  if (downlink_done) code = SigFox.endPacket(); // Regular uplink message
+  else code = SigFox.endPacket(true);  // Set Downlink Request by passing true to endPacket()
 
   if (code==0 ||
       SigFox.statusCode(SIGFOX)==FAILED_DOWNLINK_RECEPTION) {
@@ -1123,7 +1157,7 @@ void send_measurements() {
     /* From https://github.com/divetm/Getting-started-with-Sigfox/blob/master/Sensit_project/sdk/inc/sigfox/sigfox_api.h:
      * (0x62): Error occurs during the nvm storage used for ack transmission.
 
-     * It seems to be related to failed downlinnk requests. Count it as success, as it 
+     * It seems to be related to failed downlink requests. Count it as success, as it 
      * effectively ships the uplink message despite of such error */
 
     shipment = millis(); msg++;
@@ -1142,7 +1176,7 @@ void send_measurements() {
       if (emergency_active() && (!epol_active()))
         deact_emergency();
     }
-    
+
     reset_measures();
     reset_buff(send_buff);
 
@@ -1462,15 +1496,15 @@ void limit_exceeded(byte measure, byte value) {
     else {
       // Check out when last bpm limit exceeded took place 
       unsigned long aux = tstamp - bpm_limits[i].tstamp;
-      if (aux > LOOP_DELAY) {
+      if (aux > SAMPLING_RATE) {
         /* Continuity broken between calls to limit_exceeded().
         * Such difference is not reflecting the real time exceeding a 
         * bpm limit. Something happened in betweeen calls to limit_exceeded(),
         * like a shipment, which may take more than 10 seconds to complete.
-        * Store that '"idle time' to be substracted later on 'bt' condition checking. */
+        * Store that 'idle time' to be substracted later on 'bt' condition checking. */
 
         // substract loop iteration time
-        idle_time += (aux - LOOP_DELAY);
+        idle_time += (aux - SAMPLING_RATE);
       }
     }
   }
@@ -1590,35 +1624,49 @@ void loop() {
     button_flag = 0;
   }
 
-  /* See if a sample is ready from the PulseSensor.
-     If USE_INTERRUPTS is false, this call to sawNewSample()
-     will, if enough time has passed, read and process a
-     sample (analog voltage) from the PulseSensor. */
+  if (!pulsesensor_err) {
+    /* See if a sample is ready from the PulseSensor. If
+     * USE_ARDUINO_INTERRUPTS is false, this call to sawNewSample()
+     * will, if enough time has passed, read and process a sample
+     * (analog voltage) from the PulseSensor. */
+    bool new_sample = pulseSensor.sawNewSample();
+    unsigned long former_call = last_pulse_call;
 
-  if (!pulsesensor_err && pulseSensor.sawNewSample()) {
-    bpm = bytecast(pulseSensor.getBeatsPerMinute());
-    ibi = pulseSensor.getInterBeatIntervalMs();
-    sum_bpm += bpm;
-    sum_ibi += ibi;
-    bpm_ibi_sample_counter++; // count bpm and ibi readings
-    set_max_and_min(bpm, ibi);
+    last_pulse_call = micros();
+    if (!let_process && ((last_pulse_call - former_call) <= (SAMPLING_RATE*1000))) {
+      if (new_sample) {
+        bpm = bytecast(pulseSensor.getBeatsPerMinute());
+        ibi = pulseSensor.getInterBeatIntervalMs();
+        sum_bpm += bpm;
+        sum_ibi += ibi;
+        bpm_ibi_sample_counter++; // count bpm and ibi readings
+        set_max_and_min(bpm, ibi);
 
-    if (bpm<lbpm_lim) ranges[0]++;
-    else if (bpm>=lbpm_lim && bpm<=range_top) ranges[1]++;
-    else if (bpm>=(range_top+1) && bpm<=ubpm_lim) ranges[2]++;
-    else ranges[3]++; // bpm > ubpm_lim
+        if (bpm<lbpm_lim) ranges[0]++;
+        else if (bpm>=lbpm_lim && bpm<=range_top) ranges[1]++;
+        else if (bpm>=(range_top+1) && bpm<=ubpm_lim) ranges[2]++;
+        else ranges[3]++; // bpm > ubpm_lim
 
-    // check limits
-    if (check_upper_limit(bpm)) {
-      lbpm_lim_cond_set = 0;
-      limit_exceeded(UPPER_BPM_MEASURE, bpm);
+        // check limits
+        if (check_upper_limit(bpm)) {
+          lbpm_lim_cond_set = 0;
+          limit_exceeded(UPPER_BPM_MEASURE, bpm);
+        }
+        else {
+          ubpm_lim_cond_set = 0;
+          if (check_lower_limit(bpm))
+            limit_exceeded(LOWER_BPM_MEASURE, bpm);
+          else
+            lbpm_lim_cond_set = 0;
+        }
+      }
     }
     else {
-      ubpm_lim_cond_set = 0;
-      if (check_lower_limit(bpm))
-        limit_exceeded(LOWER_BPM_MEASURE, bpm);
-      else
-        lbpm_lim_cond_set = 0;
+      if (let_process == 0) let_process_samples();
+      else {
+        if ((last_pulse_call - init_process_tstamp) >= MIN_PROCESSING_TIME)
+          let_process = 0;
+      }
     }
   }
 
