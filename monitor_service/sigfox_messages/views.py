@@ -284,11 +284,18 @@ def uplink(request):
   # Update biometrics timestamps
   if (msg_type == constants.ALARM_MSG):
     biometrics_24.last_alarm_time = datetime_obj
+    if emergency:
+      ebio.last_alarm_time = datetime_obj
   elif (msg_type == constants.LIMITS_MSG):
     biometrics_24.last_limit_time = datetime_obj
+    if emergency:
+      ebio.last_limit_time = datetime_obj
   elif (msg_type == constants.ALARM_LIMITS_MSG):
     biometrics_24.last_alarm_time = datetime_obj
     biometrics_24.last_limit_time = datetime_obj
+    if emergency:
+      ebio.last_alarm_time = datetime_obj
+      ebio.last_limit_time = datetime_obj
 
   # Retrieve format bits from rpv field
   payload_format = bin_data[10] + bin_data[21] + bin_data[32]  # payload format
@@ -308,7 +315,19 @@ def uplink(request):
   temp = 0.0
   elapsed_ms = 0
 
-  if (payload_format != 4): # Retrieve range ids and percentages
+  if (payload_format != 4):
+    # First of all process average bpm related fields, which will trigger the
+    # update of bpm computing time (bpm_time DB field), necessary to update
+    # BPM Ranges values
+    avg_bpm = utils.retrieve_field(bin_data, 40, 8)                  # Average Beats Per Minute
+    print(f"(uplink) avg_bpm = {avg_bpm}")
+    computing_time = utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24,
+                                          None, datetime_obj, shipment_policy)
+    if emergency:
+      utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, None, ebio, datetime_obj,
+                           shipment_policy)
+
+    # Retrieve range ids and percentages
     l = []
     ibit = 7
     per_sum = 0
@@ -321,9 +340,9 @@ def uplink(request):
       percentage = utils.retrieve_field(bin_data, ibit+4, 7)
       print(f"(uplink) percentage = {percentage}")
       range_name = utils.get_attr_name(range_id)
-      utils.update_ranges(dev_hist, range_name, percentage, biometrics_24, None)
+      utils.update_ranges(dev_hist, range_name, percentage, computing_time, biometrics_24, None)
       if emergency:
-        utils.update_ranges(dev_hist, range_name, percentage, None, ebio)
+        utils.update_ranges(dev_hist, range_name, percentage, computing_time, None, ebio)
       l.append(range_id)
       per_sum += percentage
       ibit += 11
@@ -341,9 +360,9 @@ def uplink(request):
     print(f"(uplink) range_name = {range_name}")
     excluded_percentage = (100 - per_sum)
     print(f"(uplink) excluded_percentage = {excluded_percentage}")
-    utils.update_ranges(dev_hist, range_name, excluded_percentage, biometrics_24, None)
+    utils.update_ranges(dev_hist, range_name, excluded_percentage, computing_time, biometrics_24, None)
     if emergency:
-      utils.update_ranges(dev_hist, range_name, excluded_percentage, None, ebio)
+      utils.update_ranges(dev_hist, range_name, excluded_percentage, computing_time, None, ebio)
 
     if (excluded_id in range(4)):
       p[excluded_id] = excluded_percentage
@@ -352,14 +371,6 @@ def uplink(request):
     second_range = p[1]
     third_range = p[2]
     higher_range = p[3]
-
-    avg_bpm = utils.retrieve_field(bin_data, 40, 8)                  # Average Beats Per Minute
-    print(f"(uplink) avg_bpm = {avg_bpm}")
-    utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, biometrics_24, None,
-                         datetime_obj, shipment_policy)
-    if emergency:
-      utils.update_bpm_ibi(dev_hist, "avg_bpm", avg_bpm, None, ebio,
-                           datetime_obj, shipment_policy)
 
   # Next fields vary depending on which payload_format we're dealing with
 
@@ -377,6 +388,8 @@ def uplink(request):
     if ((max_bpm > dev_conf.higher_ebpm_limit) or
         (min_bpm < dev_conf.lower_ebpm_limit)):
       biometrics_24.last_elimit_time = datetime_obj
+      if emergency:
+        ebio.last_elimit_time = datetime_obj
 
   if (payload_format==0 or payload_format==2 or payload_format==4):  # Retrieve Temperature
     update_temp = 1
@@ -440,15 +453,15 @@ def uplink(request):
       m_type = "REPORT_MSG"
 
     epayload = models.Emergency_Payload(emergency=ebio, ereason_payload=ereason_payload,
-                                        msg_type=m_type, payload_format=str(payload_format),
+                                        msg_type=m_type, payload_format=payload_format,
                                         avg_bpm=avg_bpm, avg_ibi=avg_ibi,
                                         max_bpm=max_bpm, max_ibi=max_ibi,
                                         min_bpm=min_bpm, min_ibi=min_ibi,
-                                        lower_range=str(lower_range),
-                                        second_range=str(second_range),
-                                        third_range=str(third_range),
-                                        higher_range=str(higher_range),
-                                        temp=temp, elapsed_ms=elapsed_ms)
+                                        lower_range=float(lower_range),
+                                        second_range=float(second_range),
+                                        third_range=float(third_range),
+                                        higher_range=float(higher_range),
+                                        last_temp=temp, elapsed_ms=elapsed_ms)
 
   # Update dev_hist fields
   dev_hist.last_msg_time = datetime_obj
@@ -952,7 +965,7 @@ def biometrics_detail(request, biometrics_id):
       context["dev_hist"] = dev_hist
       context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
                                            dev_hist.higher_bpm_limit,
-                                           bio=bio)
+                                           bio)
       if ((dev_hist.continuous_delivery) and
           (dev_hist.uplink_count > 1)):
         delta = dev_hist.last_msg_time - dev_hist.running_since
@@ -982,7 +995,7 @@ def biometrics24_detail(request, patient_id):
       context["dev_hist"] = dev_hist
       context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
                                            dev_hist.higher_bpm_limit,
-                                           bio_24=bio_24)
+                                           bio_24)
       if ((dev_hist.continuous_delivery) and
           (dev_hist.uplink_count > 1)):
         delta = dev_hist.last_msg_time - dev_hist.running_since
@@ -1026,7 +1039,7 @@ def emergency_detail(request, emergency_id):
         context["epayload_qs"] = epayload_qs
       context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
                                            dev_hist.higher_bpm_limit,
-                                           emergency=emergency)
+                                           emergency)
   except models.Emergency_Biometrics.DoesNotExist:
     print("Emergency not found")
   except models.Device_History.DoesNotExist:
@@ -1050,7 +1063,7 @@ def epayload_detail(request, epayload_id):
       context["epayload"] = epayload
       context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
                                            dev_hist.higher_bpm_limit,
-                                           epayload=epayload)
+                                           epayload)
   except models.Emergency_Payload.DoesNotExist:
     print("Epayload not found")
   except models.Device_History.DoesNotExist:

@@ -85,7 +85,92 @@ class Patient_Contact(models.Model):
     return str(self.patient) + ", " + str(self.contact)
 
 
-class Emergency_Biometrics(models.Model):
+class Message_Timestamp(models.Model):
+
+  last_alarm_time = models.DateTimeField(blank=True, null=True)
+  last_limit_time = models.DateTimeField(blank=True, null=True)
+  last_elimit_time = models.DateTimeField(blank=True, null=True)
+
+  class Meta:
+    abstract = True # Abstract class, don't create a table for it on database
+
+
+class Uplink_Statistics(models.Model):
+
+  avg_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  avg_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  max_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  max_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  min_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
+  min_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+
+  lower_range = models.FloatField(null=True)
+  second_range = models.FloatField(null=True)
+  third_range = models.FloatField(null=True)
+  higher_range = models.FloatField(null=True)
+
+  last_temp = models.FloatField(null=True)
+
+  class Meta:
+    abstract = True # Abstract class, don't create a table for it on database
+
+
+class Interval_Temperature_Statistics(models.Model):
+
+  avg_temp = models.FloatField(null=True)
+  max_temp = models.FloatField(null=True)
+  min_temp = models.FloatField(null=True)
+
+  class Meta:
+    abstract = True # Abstract class, don't create a table for it on database
+
+
+class Interval_Statistics(models.Model):
+
+  bpm_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  ibi_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+
+  sum_bpm = models.PositiveIntegerField(validators=[MinValueValidator(0)], null=True)
+  sum_ibi = models.PositiveIntegerField(validators=[MinValueValidator(0)], null=True)
+
+  lower_range_samples = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  second_range_samples = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  third_range_samples = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  higher_range_samples = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+
+  temp_samples = models.IntegerField(validators=[MinValueValidator(0)], null=True)
+  sum_temp = models.FloatField(null=True)
+
+  class Meta:
+    abstract = True # Abstract class, don't create a table for it on database
+
+
+class Biometrics(Message_Timestamp, 
+                 Uplink_Statistics,
+                 Interval_Temperature_Statistics):
+
+  patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
+  date = models.DateField()
+
+  def __str__(self):
+    return str(self.patient) + ", " + str(self.date)
+
+
+class Biometrics_24(Message_Timestamp,
+                    Uplink_Statistics,
+                    Interval_Temperature_Statistics,
+                    Interval_Statistics):
+
+  patient = models.OneToOneField(Patient, on_delete=models.CASCADE, primary_key=True)
+
+  def __str__(self):
+    return str(self.patient)
+
+
+class Emergency_Biometrics(Message_Timestamp,
+                           Uplink_Statistics,
+                           Interval_Temperature_Statistics,
+                           Interval_Statistics):
 
   patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
   spawn_timestamp = models.DateTimeField()
@@ -93,58 +178,17 @@ class Emergency_Biometrics(models.Model):
   emsg_count = models.IntegerField()
   active = models.BooleanField()
 
-  bpm_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  ibi_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-
-  avg_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  sum_bpm = models.PositiveIntegerField(validators=[MinValueValidator(0)], null=True)
-  avg_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  sum_ibi = models.PositiveIntegerField(validators=[MinValueValidator(0)], null=True)
-  max_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  max_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  min_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  min_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-
-  lower_range = models.CharField(max_length=5)
-  lower_range_sum = models.CharField(max_length=25)
-  second_range = models.CharField(max_length=5)
-  second_range_sum = models.CharField(max_length=25)
-  third_range = models.CharField(max_length=5)
-  third_range_sum = models.CharField(max_length=25)
-  higher_range = models.CharField(max_length=5)
-  higher_range_sum = models.CharField(max_length=25)
-
-  temp_samples = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  last_temp = models.FloatField(null=True)
-  sum_temp = models.FloatField(null=True)
-  avg_temp = models.FloatField(null=True)
-  max_temp = models.FloatField(null=True)
-  min_temp = models.FloatField(null=True)
-
   def __str__(self):
     return str(self.spawn_timestamp)
 
 
-class Emergency_Payload(models.Model):
+class Emergency_Payload(Uplink_Statistics):
 
   emergency = models.ForeignKey(Emergency_Biometrics, on_delete=models.CASCADE)
   ereason_payload = models.BooleanField(default=True) # payload where an emergency condition was detected (True/False)
   msg_type = models.CharField(max_length=25)
-  payload_format = models.CharField(max_length=1)
+  payload_format = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(7)])
 
-  avg_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  avg_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  max_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  max_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  min_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  min_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-
-  lower_range = models.CharField(max_length=5)
-  second_range = models.CharField(max_length=5)
-  third_range = models.CharField(max_length=5)
-  higher_range = models.CharField(max_length=5)
-
-  temp = models.FloatField(null=True)
   elapsed_ms = models.PositiveIntegerField()
 
   def __str__(self):
@@ -164,78 +208,3 @@ class Attention_request(models.Model):
 
   def __str__(self):
     return ("(" + str(self.request_priority) + "): " + str(self.request_timestamp))
-
-
-class Biometrics(models.Model):
-
-  patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-  date = models.DateField()
-
-  avg_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  avg_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  max_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  max_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  min_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  min_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-
-  lower_range = models.CharField(max_length=5)
-  second_range = models.CharField(max_length=5)
-  third_range = models.CharField(max_length=5)
-  higher_range = models.CharField(max_length=5)
-
-  last_temp = models.FloatField(null=True)
-  avg_temp = models.FloatField(null=True)
-  max_temp = models.FloatField(null=True)
-  min_temp = models.FloatField(null=True)
-
-  last_alarm_time = models.DateTimeField(blank=True, null=True)
-  last_limit_time = models.DateTimeField(blank=True, null=True)
-
-  # Look at max_bpm/min_bpm fields on LIMITS_MSG message, then update this field on database if proceeds.
-  # Important timestamp for the medical team.
-  last_elimit_time = models.DateTimeField(blank=True, null=True)
-
-  def __str__(self):
-    return str(self.patient) + ", " + str(self.date)
-
-
-class Biometrics_24(models.Model):
-
-  patient = models.OneToOneField(Patient, on_delete=models.CASCADE, primary_key=True)
-  bpm_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  ibi_time = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-
-  avg_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  sum_bpm = models.PositiveIntegerField(validators=[MinValueValidator(0)], null=True)
-  avg_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  sum_ibi = models.PositiveIntegerField(validators=[MinValueValidator(0)], null=True)
-  max_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  max_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  min_bpm = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)], null=True)
-  min_ibi = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-
-  lower_range = models.CharField(max_length=5)
-  lower_range_sum = models.CharField(max_length=25)
-  second_range = models.CharField(max_length=5)
-  second_range_sum = models.CharField(max_length=25)
-  third_range = models.CharField(max_length=5)
-  third_range_sum = models.CharField(max_length=25)
-  higher_range = models.CharField(max_length=5)
-  higher_range_sum = models.CharField(max_length=25)
-
-  temp_samples = models.IntegerField(validators=[MinValueValidator(0)], null=True)
-  last_temp = models.FloatField(null=True)
-  sum_temp = models.FloatField(null=True)
-  avg_temp = models.FloatField(null=True)
-  max_temp = models.FloatField(null=True)
-  min_temp = models.FloatField(null=True)
-
-  last_alarm_time = models.DateTimeField(blank=True, null=True)
-  last_limit_time = models.DateTimeField(blank=True, null=True)
-
-  # Look at max_bpm/min_bpm fields on LIMITS_MSG message, then update this field on database if proceeds.
-  # Important timestamp for the medical team.
-  last_elimit_time = models.DateTimeField(blank=True, null=True)
-
-  def __str__(self):
-    return str(self.patient)
