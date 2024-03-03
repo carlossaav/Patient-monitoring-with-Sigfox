@@ -32,13 +32,17 @@
         <li class="list-group-item"><strong>Lower temperature limit configured:</strong> {{ device.min_temp }}</li>
         <li class="list-group-item"><strong>Bpm limit window* (in seconds):</strong> {{ device.bpm_limit_window }}</li>
         <li class="list-group-item"><strong>Minimum delay* (in minutes):</strong> {{ device.min_delay }}</li>
+        <li class="list-group-item"><strong>New emergency delay* (in minutes):</strong> {{ device.new_emerg_delay }}</li>
       </ul>
       <div class="alert alert-info mt-3">
         <strong>Bpm limit window*: threshold in seconds exceeding a higher or lower bpm limit without triggering an 
         emergency condition</strong>
       </div>
       <div class="alert alert-info mt-3">
-        <strong>Minimum delay*: Minimal delay for hitting the opposite bpm extreme (in minutes)</strong>
+        <strong>Minimum delay*: Mimimum time for hitting the opposite bpm extreme (in minutes)</strong>
+      </div>
+      <div class="alert alert-info mt-3">
+        <strong>New emergency delay*: Mimimum time to regard a new emergency message as another emergency (in minutes)</strong>
       </div>
 
       {% if request.user.is_staff %}

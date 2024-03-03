@@ -50,7 +50,8 @@ MAX_TIME_DELAY = 1360
 # Regular interval duration (REGULAR_SHIP_POLICY shipment rate)
 REGULAR_INTERVAL_DURATION = 630 # in seconds
 
-# Mimimum time to regard a new emergency message as another emergency (in minutes)
+# Default mimimum time to regard a new emergency message as another emergency (in minutes)
+# Set value must be higher or equal to 1
 NEW_EMERG_DELAY = 45
 
 # Mimimum time to resend a SMS notification (in minutes)
@@ -88,9 +89,6 @@ NOTIFIER_WAIT = 30
 # is active without "emergency acknowledgement" for both Telegram and SMS contact
 # systems.
 MAX_NOTIFICATION_TIME = 30
-
-# Default coordinates to "Unknown"
-DEFAULT_COORDINATE = "Unknown"
 
 # Device statuses
 FUNCTIONAL_DEV_STATUS = "Functional"

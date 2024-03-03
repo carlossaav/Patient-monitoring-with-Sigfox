@@ -13,6 +13,19 @@
         <form action="{% url 'modify_device_config' dev_conf.dev_id %}" method="post">
           {% csrf_token %}
           <strong>{{ form.as_p }}<strong>
+          <div class="alert alert-info mt-3">
+            <strong>Bpm limit window*: threshold in seconds exceeding a higher or lower bpm 
+            limit without triggering an emergency condition</strong>
+          </div>
+          <div class="alert alert-info mt-3">
+            <strong>Minimum delay*: Mimimum time for hitting the opposite bpm extreme (in minutes)</strong>
+          </div>
+          <div class="alert alert-info mt-3">
+            <strong>New emerg delay*: Mimimum time, in minutes, to regard a new emergency message as another emergency
+            {% if new_emerg_delay %}
+              (default {{ new_emerg_delay }})
+            {% endif %}</strong>
+          </div>
           <input type="submit" value="Submit" class="btn btn-primary" />
         </form>
         </div>

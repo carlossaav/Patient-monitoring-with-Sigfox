@@ -13,7 +13,13 @@
             limit without triggering an emergency condition</strong>
           </div>
           <div class="alert alert-info mt-3">
-            <strong>Minimum delay*: Minimal delay between configured bpm extremes</strong>
+            <strong>Minimum delay*: Mimimum time for hitting the opposite bpm extreme (in minutes) </strong>
+          </div>
+          <div class="alert alert-info mt-3">
+            <strong>New emerg delay*: Mimimum time, in minutes, to regard a new emergency message as another emergency
+            {% if new_emerg_delay %}
+              (default {{ new_emerg_delay }})
+            {% endif %}</strong>
           </div>
           <input type="submit" class="btn btn-primary" value="Submit"/>
         </form>

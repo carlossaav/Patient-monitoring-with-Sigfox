@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator, MaxValueValidator
+from sigfox_messages import constants
 
 class Device_Config(models.Model):
 
@@ -13,6 +14,15 @@ class Device_Config(models.Model):
   max_temp = models.FloatField(validators=[MinValueValidator(35.1), MaxValueValidator(38.9)], blank=False, null=False)
   bpm_limit_window = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(127)], blank=False, null=False)
   min_delay = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(15)], blank=False, null=False)
+  new_emerg_delay = models.IntegerField(validators=[MinValueValidator(1)], blank=True, null=False)
+
+  def clean(self): # Set default values for fields with blank=True parameter
+    if (self.new_emerg_delay is None):
+      self.new_emerg_delay = constants.NEW_EMERG_DELAY
+    if (self.lower_ebpm_limit is None):
+      self.lower_ebpm_limit = self.lower_bpm_limit - constants.LOWER_BPM_ELIMIT_SUM
+    if (self.higher_ebpm_limit is None):
+      self.higher_ebpm_limit = self.higher_bpm_limit + constants.HIGHER_BPM_ELIMIT_SUM
 
   def __str__(self):
     return self.dev_id
@@ -25,8 +35,8 @@ class Device_History(models.Model):
   running_since = models.DateTimeField()
   last_msg_time = models.DateTimeField()
   last_dev_state = models.CharField(max_length=25)
-  last_known_latitude = models.CharField(max_length=25)
-  last_known_longitude = models.CharField(max_length=25)
+  last_known_latitude = models.FloatField(null=True)
+  last_known_longitude = models.FloatField(null=True)
   uplink_count = models.IntegerField()
   downlink_count = models.IntegerField()
   higher_bpm_limit = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(255)])
@@ -64,14 +74,14 @@ class Patient(models.Model):
 
 class Contact(models.Model):
 
-  echat_id = models.CharField(max_length=50, primary_key=True)
+  chat_id = models.CharField(max_length=50, primary_key=True)
   chat_username = models.CharField(max_length=50) # Chat's username
-  echat_state = models.CharField(max_length=50) # Chat's state
+  chat_state = models.CharField(max_length=50) # Chat's state
   phone_number = models.CharField(max_length=50) # For SMS contact
   sms_alerts = models.BooleanField(default=True)
 
   def __str__(self):
-    return self.echat_id
+    return self.chat_id
 
 
 class Patient_Contact(models.Model):

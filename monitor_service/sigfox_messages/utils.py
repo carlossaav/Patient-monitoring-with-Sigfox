@@ -55,7 +55,7 @@ async def check_sleep(timestamp, message_delay=constants.MESSAGE_DELAY):
     await asyncio.sleep(round(delta.total_seconds(), 3))
 
 
-async def get_chat_message_locks(echat_id, chat_timestamp_notifier_alock=None):
+async def get_chat_message_locks(chat_id, chat_timestamp_notifier_alock=None):
 
   from sigfox_messages.bot import chat_timestamp_lock, last_chat_message_dlock
   from sigfox_messages.bot import manager, last_chat_message, chat_message_alock_store
@@ -70,20 +70,20 @@ async def get_chat_message_locks(echat_id, chat_timestamp_notifier_alock=None):
 
   ## Critical lock for performance. Accessed by Bot and all Notifier Processes
   chat_timestamp_lock.acquire()
-  if (echat_id not in last_chat_message_dlock):
+  if (chat_id not in last_chat_message_dlock):
     # Creating an asyncio.Lock() from calling task may result on error when
     # trying to pickle a weakref (as those created by asyncio.Lock())
-    last_chat_message_dlock[echat_id] = manager.Lock()
-    last_chat_message[echat_id] = datetime.now() - chat_message_delta
+    last_chat_message_dlock[chat_id] = manager.Lock()
+    last_chat_message[chat_id] = datetime.now() - chat_message_delta
 
-  chat_message_lock = last_chat_message_dlock[echat_id]
+  chat_message_lock = last_chat_message_dlock[chat_id]
   chat_timestamp_lock.release() # Release it quickly, so it becomes available for other chats
 
   if (chat_timestamp_notifier_alock != None):
     chat_timestamp_notifier_alock.release()
     chat_message_alock = None
   else:
-    chat_message_alock = chat_message_alock_store.get_lock(echat_id)
+    chat_message_alock = chat_message_alock_store.get_lock(chat_id)
     chat_timestamp_bot_alock.release()
 
   return chat_message_alock, chat_message_lock
@@ -106,7 +106,7 @@ async def wrap_send(last_message_alock, **kwargs):
   # As there's only one notifier task active per chat,
   # the 'chat_message_alock' is not necessary to get access to
   # 'chat_message_lock' lock
-  _, chat_message_lock = await get_chat_message_locks(kwargs["echat_id"],
+  _, chat_message_lock = await get_chat_message_locks(kwargs["chat_id"],
                                                       chat_timestamp_notifier_alock=\
                                                       kwargs["chat_timestamp_notifier_alock"])
   await send(last_message_alock, chat_message_lock, **kwargs)
@@ -119,10 +119,10 @@ async def send(last_message_alock, chat_message_lock, chat_message_alock=None, *
   reply_markup = 0
   if ("message" in kwargs): # Bot reply
     reply = 1
-    echat_id = str(kwargs["message"].chat.id)
+    chat_id = str(kwargs["message"].chat.id)
   else:
     reply = 0
-    echat_id = kwargs["echat_id"]
+    chat_id = kwargs["chat_id"]
 
   if ("text" in kwargs):
     mtype = "text message"
@@ -134,11 +134,11 @@ async def send(last_message_alock, chat_message_lock, chat_message_alock=None, *
         reply_markup = 1
     else:
       send_func = bot.send_message
-      args = (echat_id, kwargs["text"])
+      args = (chat_id, kwargs["text"])
   elif (("latitude" in kwargs) and ("longitude" in kwargs)):
     mtype = "location"
     send_func = bot.send_location
-    args = (echat_id, kwargs["latitude"], kwargs["longitude"])
+    args = (chat_id, kwargs["latitude"], kwargs["longitude"])
   else:
     print("Wrong parameters passed to send function", flush=True)
     return
@@ -159,7 +159,7 @@ async def send(last_message_alock, chat_message_lock, chat_message_alock=None, *
   # Assure there's at least 'constants.CHAT_MESSAGE_DELAY' seconds difference
   # between calls to bot.reply_to(), bot.send_message() or bot.send_location()
   # on the same chat
-  await check_sleep(last_chat_message[echat_id], constants.CHAT_MESSAGE_DELAY)
+  await check_sleep(last_chat_message[chat_id], constants.CHAT_MESSAGE_DELAY)
 
   await last_message_alock.acquire()
   last_message_lock.acquire()
@@ -168,7 +168,7 @@ async def send(last_message_alock, chat_message_lock, chat_message_alock=None, *
   # Keep the locks acquired
   await check_sleep(last_message.value, constants.MESSAGE_DELAY)
 
-  # print(f"sending {mtype} to '{echat_id}' at: {datetime.now()}", flush=True)
+  # print(f"sending {mtype} to '{chat_id}' at: {datetime.now()}", flush=True)
   if reply_markup:
     await send_func(*args, reply_markup=kwargs["reply_markup"])
   else:
@@ -178,12 +178,12 @@ async def send(last_message_alock, chat_message_lock, chat_message_alock=None, *
   last_message.value = timestamp
   last_message_lock.release()
   last_message_alock.release()
-  last_chat_message[echat_id] = timestamp
+  last_chat_message[chat_id] = timestamp
   chat_message_lock.release()
   if (chat_message_alock != None): # Bot reply task
     chat_message_alock.release()
 
-  print(f"{mtype} sent to {echat_id} at {timestamp}", flush=True)
+  print(f"{mtype} sent to {chat_id} at {timestamp}", flush=True)
 
 
 def my_get_attr(obj, attr):
@@ -272,16 +272,32 @@ def get_ranges(lower_bpm_limit, higher_bpm_limit, bio_obj):
 
 def check_emergency_deactivation(emergency, datetime_obj):
 
+  dev_conf = emergency.patient.dev_conf
   minutes = int((get_sec_diff(datetime_obj, emergency.spawn_timestamp)) // 60) # Convert it to minutes
-  if (minutes >= constants.NEW_EMERG_DELAY):
+  if (minutes >= dev_conf.new_emerg_delay):
     print("Deactivating emergency", end=' ', flush=True)
     print(emergency, flush=True)
     emergency.active = False  # Deactivate emergency
-    emergency.termination_timestamp = models.Device_History.objects.filter(dev_conf=emergency.patient.dev_conf).\
-                                         latest("date").last_msg_time
+    emergency.termination_timestamp = models.Device_History.objects.filter(dev_conf=dev_conf).\
+                                      latest("date").last_msg_time
     emergency.save()
 
   return emergency
+
+def set_device_elimits(dev_conf):
+
+  # At this service version, we configure elimits following
+  # the logic shown below, since we haven't yet implemented
+  # support for elimits specification in downlink payloads.
+
+  if (dev_conf.bpm_limit_window == 0):
+    dev_conf.lower_ebpm_limit = dev_conf.lower_bpm_limit
+    dev_conf.higher_ebpm_limit = dev_conf.higher_bpm_limit
+  else:
+    dev_conf.lower_ebpm_limit = dev_conf.lower_bpm_limit - constants.LOWER_BPM_ELIMIT_SUM
+    dev_conf.higher_ebpm_limit = dev_conf.higher_bpm_limit + constants.HIGHER_BPM_ELIMIT_SUM
+
+  return dev_conf
 
 
 # Erase all Biometrics older than 'days' days
@@ -403,7 +419,7 @@ def get_sec_diff(datetime_obj, datetime_obj2):
 
   dobj = datetime_obj - datetime_obj2
 
-  return dobj.seconds
+  return ((dobj.days*24*60*60) + dobj.seconds)
 
 
 def get_bio(dev_hist, bio_24=None, ebio=None):
@@ -642,8 +658,8 @@ async def send_dev_data(**kwargs):
   patient = kwargs["patient"]
 
   loc_avail = 0
-  latitude = constants.DEFAULT_COORDINATE
-  longitude = constants.DEFAULT_COORDINATE
+  latitude = None
+  longitude = None
   dev_conf = await async_my_get_attr(patient, "dev_conf")
   dev_hist_qs = await async_Device_History_filter(dev_conf=dev_conf)
   dev_hist = None
@@ -660,13 +676,11 @@ async def send_dev_data(**kwargs):
   title_msg += " " + patient.surname.upper() + "'---"
 
   if (dev_hist != None):
-    message = title_msg + "\nLast message sent: "
-    message += str(dev_hist.last_msg_time) + "\nLast known location: "
-
-    if (latitude != constants.DEFAULT_COORDINATE and
-        longitude != constants.DEFAULT_COORDINATE):
+    message = title_msg + "\nLast message sent: " + str(dev_hist.last_msg_time)
+    message += "\nLast known location: "
+    if ((latitude != None) and (longitude != None)):
       loc_avail = 1
-      message += "(lat:" + latitude + ", long:" + longitude + ")"
+      message += "(lat:" + str(latitude) + ", long:" + str(longitude) + ")"
     else:
       message += "Not available"
   else:
@@ -681,10 +695,10 @@ async def send_dev_data(**kwargs):
       await wrap_bot_reply(kwargs["bot_message"], latitude=latitude, longitude=longitude)
   elif ("last_message_alock" in kwargs):
     # Ongoing notifier process trying to send data
-    await wrap_send(kwargs["last_message_alock"], echat_id=contact.echat_id, text=message,
+    await wrap_send(kwargs["last_message_alock"], chat_id=contact.chat_id, text=message,
                     chat_timestamp_notifier_alock=kwargs["chat_timestamp_notifier_alock"])
     if loc_avail:
-      await wrap_send(kwargs["last_message_alock"], echat_id=contact.echat_id,
+      await wrap_send(kwargs["last_message_alock"], chat_id=contact.chat_id,
                       latitude=latitude, longitude=longitude,
                       chat_timestamp_notifier_alock=kwargs["chat_timestamp_notifier_alock"])
 
@@ -694,7 +708,7 @@ async def set_notifications_done(contact, pcontact_qs, save_chat=False,
 
   if save_chat:
     from sigfox_messages.bot import SPAWN_CONFIG
-    contact.echat_state = SPAWN_CONFIG
+    contact.chat_state = SPAWN_CONFIG
     await async_save(contact)
 
   async for pcontact in pcontact_qs:
@@ -721,14 +735,14 @@ async def check_stop(pcontact_qs, pcontact_dict):
     return stop_on_chats, stopped
 
   try: # Query database for contact status update
-    contact = await models.Contact.objects.aget(echat_id=contact.echat_id)
+    contact = await models.Contact.objects.aget(chat_id=contact.chat_id)
   except models.Contact.DoesNotExist:
     print("Error retrieving contact id", flush=True)
     return stop_on_chats, stopped
 
   from sigfox_messages.bot import ALERTING
 
-  if (contact.echat_state != ALERTING):
+  if (contact.chat_state != ALERTING):
     stopped = 1
     await set_notifications_done(contact, pcontact_qs, set_contact=True, stop_set=True)
     return stop_on_chats, stopped
@@ -874,21 +888,21 @@ async def release_notifier(**kwargs):
     message += attended_msg + '\n' # Join all request status
 
   # message = message[:(len(message)-1)] # Strip last '\n' character
-  await wrap_send(last_message_alock, echat_id=contact.echat_id, text=message+'\n'+exit_message,
+  await wrap_send(last_message_alock, chat_id=contact.chat_id, text=message+'\n'+exit_message,
                   chat_timestamp_notifier_alock=chat_timestamp_notifier_alock)
   notifier.acquire()
-  notifier_dict[contact.echat_id] = False
+  notifier_dict[contact.chat_id] = False
   notifier.release()
   comm_status.release()
   notifier_event.set()
   print("Waiting for applicant_event to be set to leave notification loop ", end='', flush=True)
-  print(f"for chat {contact.echat_id}", flush=True)
+  print(f"for chat {contact.chat_id}", flush=True)
   # was_set = applicant_event.wait(timeout=30)
   was_set = await wait_event(applicant_event, timeout=constants.NOTIFIER_WAIT)
   if was_set:
-    print(f"applicant_event was set for chat = {contact.echat_id} ", flush=True)
+    print(f"applicant_event was set for chat = {contact.chat_id} ", flush=True)
   else:
-    print(f"applicant_event timed out for chat = {contact.echat_id} ", flush=True)
+    print(f"applicant_event timed out for chat = {contact.chat_id} ", flush=True)
   # applicant_event.clear() # Placed here this call generates errors, avoid it
 
 
@@ -911,7 +925,7 @@ async def notify_contact(**kwargs):
 
   # If we are within this function, it means we've already acquired 'notifier lock'
   # related to this chat
-  notifier_dict[contact.echat_id] = True
+  notifier_dict[contact.chat_id] = True
   notifier.release()
   notifier_event.set()
 
@@ -924,7 +938,7 @@ async def notify_contact(**kwargs):
   stop_event.clear()
 
   # Update pcontact/contact fields
-  contact.echat_state = ALERTING
+  contact.chat_state = ALERTING
   await async_save(contact)
   await async_my_set_attr(pcontact, "contact", contact)
   await async_save(pcontact)
@@ -985,14 +999,14 @@ async def notify_contact(**kwargs):
     if origin:
       origin = 0
       message = await get_emergency_message(pcontact_dict)
-      await wrap_send(last_message_alock, echat_id=contact.echat_id, text=message,
+      await wrap_send(last_message_alock, chat_id=contact.chat_id, text=message,
                       chat_timestamp_notifier_alock=chat_timestamp_notifier_alock)
       origin_time = datetime.now() # Save first notification timestamp
       for e in range(1, 4):
         stop_set = await wait_event(stop_event, timeout=5)
         if stop_set:
           break
-        await wrap_send(last_message_alock, echat_id=contact.echat_id, text=message,
+        await wrap_send(last_message_alock, chat_id=contact.chat_id, text=message,
                         chat_timestamp_notifier_alock=chat_timestamp_notifier_alock)
 
       if ((not stop_set) and (contact.sms_alerts)):
@@ -1021,7 +1035,7 @@ async def notify_contact(**kwargs):
           await send_sms_alert(contact, SMS_ALERT_MESSAGE)
           sms_timestamp = datetime.now()
           await asyncio.sleep(10)
-      await wrap_send(last_message_alock, echat_id=contact.echat_id, text=message,
+      await wrap_send(last_message_alock, chat_id=contact.chat_id, text=message,
                       chat_timestamp_notifier_alock=chat_timestamp_notifier_alock)
 
     notifier_event.clear()
@@ -1072,7 +1086,7 @@ async def notify_contact(**kwargs):
       else:
         # Since we're going to continue notifying, we need to restore chat's state to 'ALERTING'
         # (which was set to 'SPAWN_CONFIG' within check_stop())
-        contact.echat_state = ALERTING
+        contact.chat_state = ALERTING
         await async_save(contact)
     else: # notify == True
       delta = datetime.now() - origin_time
@@ -1118,10 +1132,10 @@ def notifier(patient):
     async for pcontact in pcontact_qs:
       contact = await async_my_get_attr(pcontact, "contact")
       event_dict_lock.acquire()
-      (notifier_event, applicant_event, stop_event) = event_dict[contact.echat_id]
+      (notifier_event, applicant_event, stop_event) = event_dict[contact.chat_id]
       event_dict_lock.release()
       comm_statuses_lock.acquire()
-      comm_status = comm_status_dict_lock[contact.echat_id]
+      comm_status = comm_status_dict_lock[contact.chat_id]
       comm_statuses_lock.release()
       applicant_event.clear()
       comm_status.acquire() # Acquire lock to set pcontact fields
@@ -1130,18 +1144,18 @@ def notifier(patient):
       await async_save(pcontact)
       comm_status.release()
       notifiers_lock.acquire()
-      notifier = notifier_dict_lock[contact.echat_id]
+      notifier = notifier_dict_lock[contact.chat_id]
       notifiers_lock.release()
       notifier.acquire() # Acquire notifier lock to access 'notifier' value
-      notifier_value = notifier_dict[contact.echat_id]
+      notifier_value = notifier_dict[contact.chat_id]
       if (notifier_value == True):
-        print(f"There's an ongoing notification task for chat {contact.echat_id}", flush=True)
+        print(f"There's an ongoing notification task for chat {contact.chat_id}", flush=True)
         notifier.release()
         # Take note of the chat that has an ongoing notifier process
-        busy_chats[contact.echat_id] = (notifier_event, applicant_event)
+        busy_chats[contact.chat_id] = (notifier_event, applicant_event)
         continue
 
-      print(f"Getting in notify_contact() for chat {contact.echat_id}", flush=True)
+      print(f"Getting in notify_contact() for chat {contact.chat_id}", flush=True)
       asyncio.create_task(notify_contact(pcontact=pcontact,
                                          notifier_event=notifier_event,
                                          applicant_event=applicant_event,
@@ -1161,25 +1175,25 @@ def notifier(patient):
 
   asyncio.run(notify())
 
-  for echat_id, (notifier_event, applicant_event) in busy_chats.items():
+  for chat_id, (notifier_event, applicant_event) in busy_chats.items():
     notifiers_lock.acquire()
-    if (echat_id in notifier_dict_lock):
-      notifier = notifier_dict_lock[echat_id]
+    if (chat_id in notifier_dict_lock):
+      notifier = notifier_dict_lock[chat_id]
       notifiers_lock.release()
     else:
       # Contact has been removed from Database
       notifiers_lock.release()
       continue
     notifier.acquire() # Acquire notifier lock to access chat's 'notifier' value
-    notifier_value = notifier_dict[echat_id]
+    notifier_value = notifier_dict[chat_id]
     if (notifier_value == True):
       # Wait to exit until ongoing notifier from that chat enable us to do it
       notifier.release()
-      print(f"Waiting for notifier_event from chat {echat_id} to be set to terminate", flush=True)
+      print(f"Waiting for notifier_event from chat {chat_id} to be set to terminate", flush=True)
       # Single-threaded process checking out other notifier's state to leave gracefully.
       # No need to do the async wait with "await wait_event(notifier_event)"
       notifier_event.wait()
-      print(f"chat's {echat_id} notifier_event set", flush=True)
+      print(f"chat's {chat_id} notifier_event set", flush=True)
     else:
       notifier.release()
 

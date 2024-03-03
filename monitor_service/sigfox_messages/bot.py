@@ -106,18 +106,18 @@ class Chat_Message_Async_Lock_Store:
   def __init__(self):
     self.lock_dict = {}
 
-  def get_lock(self, echat_id):
-    if (echat_id not in self.lock_dict):
-      return self.create_lock(echat_id)
-    return self.lock_dict[echat_id]
+  def get_lock(self, chat_id):
+    if (chat_id not in self.lock_dict):
+      return self.create_lock(chat_id)
+    return self.lock_dict[chat_id]
 
-  def create_lock(self, echat_id):
-    self.lock_dict[echat_id] = asyncio.Lock()
-    return self.lock_dict[echat_id]
+  def create_lock(self, chat_id):
+    self.lock_dict[chat_id] = asyncio.Lock()
+    return self.lock_dict[chat_id]
 
-  def remove_lock(self, echat_id):
-    if (echat_id in self.lock_dict):
-      del(self.lock_dict[echat_id])
+  def remove_lock(self, chat_id):
+    if (chat_id in self.lock_dict):
+      del(self.lock_dict[chat_id])
 
 
 @bot.message_handler(commands=["stop"])
@@ -125,8 +125,8 @@ async def handle_stop_command(message):
 
   stop_err = 0
   try:
-   contact = await models.Contact.objects.aget(echat_id=str(message.chat.id))
-   if (contact.echat_state != ALERTING):
+   contact = await models.Contact.objects.aget(chat_id=str(message.chat.id))
+   if (contact.chat_state != ALERTING):
      stop_err = 1
   except models.Contact.DoesNotExist:
     stop_err = 1
@@ -135,12 +135,12 @@ async def handle_stop_command(message):
     await utils.wrap_bot_reply(message, text="Nothing to stop. " + help_message)
     return
 
-  contact.echat_state = SPAWN_CONFIG
+  contact.chat_state = SPAWN_CONFIG
   await utils.async_save(contact)
   await utils.wrap_bot_reply(message, text="Stopping alerts...")
   
   event_dict_lock.acquire()
-  (_, _, stop_event) = event_dict[contact.echat_id]
+  (_, _, stop_event) = event_dict[contact.chat_id]
   stop_event.set()
   event_dict_lock.release()
 
@@ -149,12 +149,12 @@ async def handle_stop_command(message):
 async def exit_dialogue(message):
 
   try:
-    contact = await models.Contact.objects.aget(echat_id=str(message.chat.id))
-    if (contact.echat_state in input_states):
+    contact = await models.Contact.objects.aget(chat_id=str(message.chat.id))
+    if (contact.chat_state in input_states):
       reply = "Exited. Thanks for using Patient Monitoring Service."
-      contact.echat_state = SPAWN_CONFIG
+      contact.chat_state = SPAWN_CONFIG
       await utils.async_save(contact)
-    elif (contact.echat_state == ALERTING):
+    elif (contact.chat_state == ALERTING):
       reply = stop_broadcast_msg
     else:
       reply = help_message
@@ -175,43 +175,43 @@ async def init_dialogue(message):
   hlp = "How may I help you? Below there's a list of things I can do for you:" + help_list
 
   try:
-    contact = await models.Contact.objects.aget(echat_id=str(message.chat.id))
+    contact = await models.Contact.objects.aget(chat_id=str(message.chat.id))
   except models.Contact.DoesNotExist:
-    contact = await models.Contact.objects.acreate(echat_id=str(message.chat.id),
+    contact = await models.Contact.objects.acreate(chat_id=str(message.chat.id),
                                                    chat_username=message.from_user.first_name,
-                                                   echat_state=SPAWN_CONFIG,
+                                                   chat_state=SPAWN_CONFIG,
                                                    phone_number="",
                                                    sms_alerts=True)
     event_dict_lock.acquire()
-    event_dict[contact.echat_id] = (manager.Event(), manager.Event(), manager.Event())
+    event_dict[contact.chat_id] = (manager.Event(), manager.Event(), manager.Event())
     event_dict_lock.release()
     comm_statuses_lock.acquire()
-    comm_status_dict_lock[contact.echat_id] = manager.Lock()
+    comm_status_dict_lock[contact.chat_id] = manager.Lock()
     comm_statuses_lock.release()
     notifiers_lock.acquire()
-    notifier_dict_lock[contact.echat_id] = manager.Lock()
-    notifier_dict[contact.echat_id] = False
+    notifier_dict_lock[contact.chat_id] = manager.Lock()
+    notifier_dict[contact.chat_id] = False
     notifiers_lock.release()
     await chat_timestamp_bot_alock.acquire()
     chat_timestamp_lock.acquire()
-    if (contact.echat_id not in last_chat_message_dlock):
-      last_chat_message_dlock[contact.echat_id] = manager.Lock()
-      last_chat_message[contact.echat_id] = datetime.now() - utils.chat_message_delta
-      chat_message_alock_store.create_lock(contact.echat_id)
+    if (contact.chat_id not in last_chat_message_dlock):
+      last_chat_message_dlock[contact.chat_id] = manager.Lock()
+      last_chat_message[contact.chat_id] = datetime.now() - utils.chat_message_delta
+      chat_message_alock_store.create_lock(contact.chat_id)
     chat_timestamp_lock.release()
     chat_timestamp_bot_alock.release()
 
   markup = None
-  if (contact.echat_state in input_states[:8]):
+  if (contact.chat_state in input_states[:8]):
     reply = "You are now within a configuration process. If you want to leave the process without "
     reply += "confirming changes, issue '/exit' command. You can restart it later."
-  elif (contact.echat_state == ALERTING):
+  elif (contact.chat_state == ALERTING):
     reply = stop_broadcast_msg
   elif (message.text == "/start"):
     qs = await utils.async_Patient_Contact_filter(contact=contact)
     exists = await qs.aexists() # Check whether this phone is already linked to some patient
     if not exists:
-      contact.echat_state = WAIT_CONTACT
+      contact.chat_state = WAIT_CONTACT
       await utils.async_save(contact)
       markup = types.ReplyKeyboardMarkup(one_time_keyboard=True)
       contact_button = types.KeyboardButton(text="Share this contact", request_contact=True)
@@ -221,7 +221,7 @@ async def init_dialogue(message):
       reply = "This phone is already linked to some patient. If you want to add more patients to it, "
       reply += " please issue '/add' command or '/help' to get interactive help"
   else: # /help command issued
-    contact.echat_state = WAIT_HELP_OPTION
+    contact.chat_state = WAIT_HELP_OPTION
     await utils.async_save(contact)
     reply = hlp
 
@@ -231,10 +231,10 @@ async def init_dialogue(message):
 def check_state(contact):
 
   ret = 1
-  if (contact.echat_state in input_states[:8]):
+  if (contact.chat_state in input_states[:8]):
     reply = "You are now within a configuration process. If you want to leave the process without "
     reply += "confirming changes, issue '/exit' command. You can restart it later. Input:"
-  elif (contact.echat_state == ALERTING):
+  elif (contact.chat_state == ALERTING):
     reply = stop_broadcast_msg
   else:
     ret = 0 # Success
@@ -243,10 +243,10 @@ def check_state(contact):
   return ret, reply
 
 
-async def check_conditions(echat_id):
+async def check_conditions(chat_id):
 
   try:
-    contact = await models.Contact.objects.aget(echat_id=echat_id)
+    contact = await models.Contact.objects.aget(chat_id=chat_id)
     ret, reply = check_state(contact)
     if ret:
       return 1, contact, reply
@@ -271,8 +271,8 @@ async def add_patient(message):
     return
 
   # All conditions were met, ask for the patient's name to perform 'add' operation
-  contact.echat_state = WAIT_NAME_INPUT
-  wait_name_dict[contact.echat_id] = ("add", None)
+  contact.chat_state = WAIT_NAME_INPUT
+  wait_name_dict[contact.chat_id] = ("add", None)
   await utils.async_save(contact)
   reply = "So you want to link more patients to this chat. Please, tell me the complete name of the "
   reply += " patient you'd wish to follow up. If he/she has a compound name, please provide only the "
@@ -284,7 +284,7 @@ async def add_patient(message):
 
 async def perform_location(contact, message):
 
-  dloc = wait_loc_patient[contact.echat_id]
+  dloc = wait_loc_patient[contact.chat_id]
   pat_found = 0
   for e in dloc:
     pat = dloc[e]
@@ -294,8 +294,8 @@ async def perform_location(contact, message):
       patient = pat
       break
 
-  contact.echat_state = SPAWN_CONFIG
-  del(wait_loc_patient[contact.echat_id])
+  contact.chat_state = SPAWN_CONFIG
+  del(wait_loc_patient[contact.chat_id])
 
   if pat_found:
     await utils.send_dev_data(contact=contact, patient=patient, bot_message=message)
@@ -318,8 +318,8 @@ async def locate_patient(message):
   reply = "Would you like to get some patient's latest recorded location? Alright, "
   reply += "below you'll see the list of patients you're actually monitoring on this telephone:\n\n"
   i = 1
-  wait_loc_patient[contact.echat_id] = {}
-  dloc = wait_loc_patient[contact.echat_id]
+  wait_loc_patient[contact.chat_id] = {}
+  dloc = wait_loc_patient[contact.chat_id]
   pcontact_qs = await utils.async_Patient_Contact_filter(contact=contact)
   async for pcontact in pcontact_qs:
     patient = await utils.async_my_get_attr(pcontact, "patient")
@@ -327,11 +327,11 @@ async def locate_patient(message):
     reply += str(i) + ") " + patient.name + " " + patient.surname + ", with dni '" + patient.dni + "'\n"
     i += 1
 
-  wait_loc_patient[contact.echat_id] = dloc  
+  wait_loc_patient[contact.chat_id] = dloc  
   reply += "\nWhich one would you like to locate?: (name/number)"
 
   # All conditions were met, ask for the patient's name to perform 'locate' operation
-  contact.echat_state = WAIT_NAME_INPUT
+  contact.chat_state = WAIT_NAME_INPUT
   await utils.async_save(contact)
 
   await utils.wrap_bot_reply(message, text=reply)
@@ -346,7 +346,7 @@ async def setup_sms(message):
     return
 
   # All conditions were met
-  contact.echat_state = WAIT_SMS_OPTION
+  contact.chat_state = WAIT_SMS_OPTION
   await utils.async_save(contact)
   reply = "What would you like to do? Type 'enable' or 'en' if you'd like enabling SMS alerts "
   reply += "for all patients linked to this phone. Type 'disable' or 'dis' if you wish this feature "
@@ -375,7 +375,7 @@ async def check_sms_option(contact, text):
     reply += "command to leave the process:"
     return contact, reply
 
-  contact.echat_state = SPAWN_CONFIG
+  contact.chat_state = SPAWN_CONFIG
   return contact, reply
 
 
@@ -392,8 +392,8 @@ async def delete_number(message):
   l = []
   async for pcontact in models.Patient_Contact.objects.filter(contact=contact):
     l.append(pcontact)
-  wait_del_dict[contact.echat_id] = l
-  contact.echat_state = WAIT_DEL_CONF
+  wait_del_dict[contact.chat_id] = l
+  contact.chat_state = WAIT_DEL_CONF
   await utils.async_save(contact)
   reply = "Are you sure you want to erase this number from our Database? If you proceed, you won't "
   reply += "receive any notifications from Patient Monitoring Service on this phone (neither by Telegram "
@@ -406,7 +406,7 @@ async def delete_number(message):
 async def show_patients(message):
 
   try:
-    contact = await models.Contact.objects.aget(echat_id=str(message.chat.id))
+    contact = await models.Contact.objects.aget(chat_id=str(message.chat.id))
     ret, reply = check_state(contact)
     if ret: # Chat's state is not suitable to perform '/show' command
       await utils.wrap_bot_reply(message, text=reply)
@@ -428,7 +428,7 @@ async def show_patients(message):
       else:
         reply = "This chat has not been linked to any patient yet. Issue '/start' command to do so."
 
-      contact.echat_state = SPAWN_CONFIG
+      contact.chat_state = SPAWN_CONFIG
       await utils.async_save(contact)
       await utils.wrap_bot_reply(message, text=reply)
   except models.Contact.DoesNotExist: # chat not recorded on Database
@@ -437,7 +437,7 @@ async def show_patients(message):
 
 async def unfollow_patient(contact, text):
 
-  l = wait_unfollow_dict[contact.echat_id]
+  l = wait_unfollow_dict[contact.chat_id]
 
   unf_options = []
   for e in range(len(l)):
@@ -447,8 +447,8 @@ async def unfollow_patient(contact, text):
     pcontact = l[int(text)-1]
     patient = await utils.async_my_get_attr(pcontact, "patient")
     await pcontact.adelete()
-    del(wait_unfollow_dict[contact.echat_id])
-    contact.echat_state = SPAWN_CONFIG
+    del(wait_unfollow_dict[contact.chat_id])
+    contact.chat_state = SPAWN_CONFIG
     reply = "Follow up discarded for patient '" + patient.name + " " + patient.surname + "' on this phone."
   else:
     reply = "Please provide a valid number from former's patient list or issue '/exit' command to leave "
@@ -474,9 +474,9 @@ async def handle_unfollow(message):
     l.append(pcontact)
     i += 1
 
-  wait_unfollow_dict[contact.echat_id] = l
+  wait_unfollow_dict[contact.chat_id] = l
   reply += "\nWhich one would you like to 'unfollow'? (Type number): "
-  contact.echat_state = WAIT_UNFOLLOW_OPTION
+  contact.chat_state = WAIT_UNFOLLOW_OPTION
   await utils.async_save(contact)
   await utils.wrap_bot_reply(message, text=reply)
 
@@ -491,59 +491,59 @@ async def confirm_operation(contact, text, chat_state):
   if (text in l[:5]): # User confirmed operation
     if (chat_state == WAIT_PATIENT_CONFIRM):
       try:
-        command, patient = wait_name_dict[contact.echat_id]
+        command, patient = wait_name_dict[contact.chat_id]
         pcontact = await models.Patient_Contact.objects.acreate(patient=patient, contact=contact,
                                                                 comm_status="Done", stop_set=False)
-        del(wait_name_dict[contact.echat_id])
+        del(wait_name_dict[contact.chat_id])
         reply = "Alright, this telephone has been succesfully registered for patient '" + patient.name
         reply += " " + patient.surname + "', with dni '" + patient.dni + "'. From now on, all emergency "
         reply += "notifications from this patient will be addressed to this number. "
         if command == "start":
-          contact.echat_state = WAIT_SMS_CONF
+          contact.chat_state = WAIT_SMS_CONF
           reply += "\nFinally, would you like to enable SMS alert feature, or just dropping it? Your answer "
           reply += "will enable or disable this option, respectively, for every single patient linked to this "
           reply += "phone. Anyway, you can modify this behaviour later on if you wish [yes/no]:"
         else: # performing '/add' command
-          contact.echat_state = SPAWN_CONFIG
+          contact.chat_state = SPAWN_CONFIG
           reply += goodbye_msg
       except KeyError:
         reply = "There was an error while indexing the patient. Please try again by issuing '/start' command or "
         reply += "'/help' to get interactive help"
-        contact.echat_state = SPAWN_CONFIG
+        contact.chat_state = SPAWN_CONFIG
     elif (chat_state == WAIT_SMS_CONF):
       contact.sms_alerts = True
-      contact.echat_state = SPAWN_CONFIG
+      contact.chat_state = SPAWN_CONFIG
       reply = "Alright, SMS alert system has also been enabled on this phone. " + goodbye_msg
     elif (chat_state == WAIT_DEL_CONF):
       contacts_lock.acquire()
-      echat_id = contact.echat_id
-      for pcontact in wait_del_dict[echat_id]:
+      chat_id = contact.chat_id
+      for pcontact in wait_del_dict[chat_id]:
         await pcontact.adelete()
       await contact.adelete()
-      del(wait_del_dict[echat_id])
+      del(wait_del_dict[chat_id])
       notifiers_lock.acquire()
-      notifier = notifier_dict_lock[echat_id]
+      notifier = notifier_dict_lock[chat_id]
       notifier.acquire()
-      del(notifier_dict[echat_id]) # Delete notifer's chat state value
-      del(notifier_dict_lock[echat_id]) # Delete notifer lock of the chat from dict
+      del(notifier_dict[chat_id]) # Delete notifer's chat state value
+      del(notifier_dict_lock[chat_id]) # Delete notifer lock of the chat from dict
       notifier.release()
       notifiers_lock.release()
       comm_statuses_lock.acquire()
-      del(comm_status_dict_lock[echat_id])
+      del(comm_status_dict_lock[chat_id])
       comm_statuses_lock.release()
       event_dict_lock.acquire()
-      del(event_dict[echat_id])
+      del(event_dict[chat_id])
       event_dict_lock.release()
       await chat_timestamp_bot_alock.acquire()
       chat_timestamp_lock.acquire()
-      chat_message_alock = chat_message_alock_store.get_lock(echat_id)
-      chat_message_lock = last_chat_message_dlock[echat_id]
+      chat_message_alock = chat_message_alock_store.get_lock(chat_id)
+      chat_message_lock = last_chat_message_dlock[chat_id]
       await chat_message_alock.acquire()
       chat_message_lock.acquire()
-      del(last_chat_message[echat_id])
-      del(last_chat_message_dlock[echat_id])
+      del(last_chat_message[chat_id])
+      del(last_chat_message_dlock[chat_id])
       chat_message_lock.release()
-      chat_message_alock_store.remove_lock(echat_id)
+      chat_message_alock_store.remove_lock(chat_id)
       chat_message_alock.release()
       chat_timestamp_lock.release()
       chat_timestamp_bot_alock.release()
@@ -551,15 +551,15 @@ async def confirm_operation(contact, text, chat_state):
       contact = None
       reply = "Phone number deleted from Database. " + goodbye_msg + " Kind Regards"
   elif (text in l[5:]): # User "backed out"
-    contact.echat_state = SPAWN_CONFIG
+    contact.chat_state = SPAWN_CONFIG
     if (chat_state == WAIT_PATIENT_CONFIRM):
-      del(wait_name_dict[contact.echat_id])
+      del(wait_name_dict[contact.chat_id])
       reply = "Registration cancelled. "
     elif (chat_state == WAIT_SMS_CONF):
       contact.sms_alerts = False
       reply = "SMS alert system discarded on this phone. "
     elif (chat_state == WAIT_DEL_CONF):
-      del(wait_del_dict[contact.echat_id])
+      del(wait_del_dict[contact.chat_id])
       reply = "Phone deletion discarded. "
 
   return contact, reply
@@ -569,8 +569,8 @@ async def confirm_operation(contact, text, chat_state):
 async def config_number(message):
 
   try:
-    contact = await models.Contact.objects.aget(echat_id=str(message.chat.id))
-    if (contact.echat_state != WAIT_CONTACT):
+    contact = await models.Contact.objects.aget(chat_id=str(message.chat.id))
+    if (contact.chat_state != WAIT_CONTACT):
       await utils.wrap_bot_reply(message, text="Not expecting contact now. " + help_message)
       return
   except models.Contact.DoesNotExist:
@@ -578,13 +578,13 @@ async def config_number(message):
     return
 
   # Save contact's phone number
-  contact.echat_state = WAIT_NAME_INPUT
+  contact.chat_state = WAIT_NAME_INPUT
   contact.phone_number = str(message.contact.phone_number)
   if (contact.phone_number[0] == '+'):
     contact.phone_number = contact.phone_number[1:]
   await utils.async_save(contact)
 
-  wait_name_dict[contact.echat_id] = ("start", None)
+  wait_name_dict[contact.chat_id] = ("start", None)
   reply = "--Contact saved--\nNow, can you please tell me the complete name of the patient you'd like to "
   reply += "follow up on this device? If he/she has a compound name, please provide only the first part of it. "
   reply += "For example, for patient 'Charles Robert Johnson Smith', just type 'Charles Johnson Smith':"""
@@ -595,17 +595,17 @@ async def config_number(message):
 async def name_checkout(contact, patient):
 
   if (patient == None or contact == None):
-    contact.echat_state = SPAWN_CONFIG
-    del(wait_name_dict[contact.echat_id])
+    contact.chat_state = SPAWN_CONFIG
+    del(wait_name_dict[contact.chat_id])
     reply = "Operation failed. Exiting."
     return contact, reply
 
-  command, _ = wait_name_dict[contact.echat_id]
+  command, _ = wait_name_dict[contact.chat_id]
   qs = await utils.async_Patient_Contact_filter(patient=patient, contact=contact)
   exists = await qs.aexists() # Check whether that patient is already linked to this chat
   if not exists:
-    wait_name_dict[contact.echat_id] = command, patient
-    contact.echat_state = WAIT_PATIENT_CONFIRM
+    wait_name_dict[contact.chat_id] = command, patient
+    contact.chat_state = WAIT_PATIENT_CONFIRM
     reply = "Quite so, we've found a patient, named '" + patient.name + " " + patient.surname
     reply += "', with dni '" + patient.dni + "' in our database. Can you please confirm this is the"
     reply += " patient you're asking for? [yes/no]:"
@@ -613,8 +613,8 @@ async def name_checkout(contact, patient):
     reply = "This number has already been registered for patient '" + patient.name + " "
     reply += patient.surname + "', dni '" + patient.dni + "'. Issue '/show' command if you want to"
     reply += " get a list of the patients followed on this phone."
-    del(wait_name_dict[contact.echat_id])
-    contact.echat_state = SPAWN_CONFIG
+    del(wait_name_dict[contact.chat_id])
+    contact.chat_state = SPAWN_CONFIG
 
   return contact, reply
 
@@ -623,21 +623,21 @@ async def name_checkout(contact, patient):
 async def config(message):
 
   try:
-    contact = await models.Contact.objects.aget(echat_id=str(message.chat.id))
+    contact = await models.Contact.objects.aget(chat_id=str(message.chat.id))
   except models.Contact.DoesNotExist:
     await utils.wrap_bot_reply(message, text=help_message)
     return
 
-  if (contact.echat_state == SPAWN_CONFIG):
+  if (contact.chat_state == SPAWN_CONFIG):
     reply = help_message
-  elif (contact.echat_state == ALERTING):
+  elif (contact.chat_state == ALERTING):
     reply = stop_broadcast_msg
-  elif (contact.echat_state == WAIT_CONTACT):
-    contact.echat_state = SPAWN_CONFIG
+  elif (contact.chat_state == WAIT_CONTACT):
+    contact.chat_state = SPAWN_CONFIG
     reply = "We were expecting for your contact, but got some text input. Plese, restart the process by issuing "
     reply += "'/start' command"
-  elif (contact.echat_state == WAIT_NAME_INPUT): # User interaction
-    if (contact.echat_id in wait_loc_patient): # '/locate' command issued
+  elif (contact.chat_state == WAIT_NAME_INPUT): # User interaction
+    if (contact.chat_id in wait_loc_patient): # '/locate' command issued
       contact, reply = await perform_location(contact, message)
       if (reply == None):
         return
@@ -651,46 +651,46 @@ async def config(message):
       except models.Patient.DoesNotExist:
         reply = "No patients were found with that name. He/She might not be registered in our website yet."
         reply += " Exiting process."
-        contact.echat_state = SPAWN_CONFIG
-        del(wait_name_dict[contact.echat_id])
+        contact.chat_state = SPAWN_CONFIG
+        del(wait_name_dict[contact.chat_id])
       except models.Patient.MultipleObjectsReturned:
         reply = "Several patients were found with that name in our database. Please provide DNI of '"
         reply += message.text + "':"
-        contact.echat_state = WAIT_DNI_INPUT
-  elif (contact.echat_state == WAIT_PATIENT_CONFIRM): # Patient's confirmation expected
+        contact.chat_state = WAIT_DNI_INPUT
+  elif (contact.chat_state == WAIT_PATIENT_CONFIRM): # Patient's confirmation expected
     contact, reply = await confirm_operation(contact, message.text, WAIT_PATIENT_CONFIRM)
-  elif (contact.echat_state == WAIT_DNI_INPUT): # DNI expected as input
+  elif (contact.chat_state == WAIT_DNI_INPUT): # DNI expected as input
     try:
       patient = await models.Patient.objects.aget(dni=message.text) # Primary key
       contact, reply = await name_checkout(contact, patient)
     except models.Patient.DoesNotExist:
       reply = "No matching patient for the dni provided. Please make sure you typed it correctly, then issue"
       reply += " the command again to restart the process"
-      contact.echat_state = SPAWN_CONFIG
-      del(wait_name_dict[contact.echat_id])
-  elif (contact.echat_state == WAIT_SMS_OPTION):
+      contact.chat_state = SPAWN_CONFIG
+      del(wait_name_dict[contact.chat_id])
+  elif (contact.chat_state == WAIT_SMS_OPTION):
     contact, reply = await check_sms_option(contact, message.text)
-  elif(contact.echat_state == WAIT_SMS_CONF): # SMS confirmation expected
+  elif(contact.chat_state == WAIT_SMS_CONF): # SMS confirmation expected
     contact, reply = await confirm_operation(contact, message.text, WAIT_SMS_CONF)
-  elif (contact.echat_state == WAIT_DEL_CONF):
+  elif (contact.chat_state == WAIT_DEL_CONF):
     contact, reply = await confirm_operation(contact, message.text, WAIT_DEL_CONF)
-  elif (contact.echat_state == WAIT_UNFOLLOW_OPTION):
+  elif (contact.chat_state == WAIT_UNFOLLOW_OPTION):
     contact, reply = await unfollow_patient(contact, message.text)
-  elif (contact.echat_state == WAIT_HELP_OPTION):
+  elif (contact.chat_state == WAIT_HELP_OPTION):
     if (message.text in options):
       # perform associated command in operations dictionary
       command, func = operations[message.text]
       reply = "Performing " + command + " command..."
       await utils.wrap_bot_reply(message, text=reply)
       if (message.text != '10'):  # Keep WAIT_HELP_OPTION chat state on '/exit' command
-        contact.echat_state = SPAWN_CONFIG
+        contact.chat_state = SPAWN_CONFIG
         await utils.async_save(contact)
       msg = message
       msg.text = command
       await func(msg)
       return
     else:
-      contact.echat_state = SPAWN_CONFIG
+      contact.chat_state = SPAWN_CONFIG
       reply = "Invalid option."
       
   if (contact != None): # delete_number() returns None contact
@@ -713,7 +713,7 @@ async def default_err(message):
 def restart_chats():
 
   for contact in models.Contact.objects.all():
-    contact.echat_state = SPAWN_CONFIG
+    contact.chat_state = SPAWN_CONFIG
     contact.save()
     for pcontact in models.Patient_Contact.objects.filter(contact=contact):
       pcontact.contact = contact
@@ -731,7 +731,7 @@ async def do_polling():
 
   chat_message_alock_store = Chat_Message_Async_Lock_Store()
   async for contact in models.Contact.objects.all():
-    chat_message_alock_store.create_lock(contact.echat_id)
+    chat_message_alock_store.create_lock(contact.chat_id)
 
   await bot.polling()
 
@@ -783,12 +783,12 @@ def main():
   # Populate shared dicts among bot and chat notifiers
   contacts_lock.acquire()
   for contact in models.Contact.objects.all():
-    event_dict[contact.echat_id] = (manager.Event(), manager.Event(), manager.Event())
-    comm_status_dict_lock[contact.echat_id] = manager.Lock()
-    notifier_dict_lock[contact.echat_id] = manager.Lock()
-    notifier_dict[contact.echat_id] = False
-    last_chat_message_dlock[contact.echat_id] = manager.Lock()
-    last_chat_message[contact.echat_id] = datetime.now() - utils.chat_message_delta
+    event_dict[contact.chat_id] = (manager.Event(), manager.Event(), manager.Event())
+    comm_status_dict_lock[contact.chat_id] = manager.Lock()
+    notifier_dict_lock[contact.chat_id] = manager.Lock()
+    notifier_dict[contact.chat_id] = False
+    last_chat_message_dlock[contact.chat_id] = manager.Lock()
+    last_chat_message[contact.chat_id] = datetime.now() - utils.chat_message_delta
   contacts_lock.release()
 
   restart_chats() # Restart chat states

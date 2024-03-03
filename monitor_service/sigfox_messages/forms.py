@@ -19,7 +19,7 @@ class Attention_requestForm(forms.Form):
 class Device_ConfigForm(forms.ModelForm):
   class Meta:
     model = Device_Config
-    fields = '__all__'
+    exclude = ["higher_ebpm_limit", "lower_ebpm_limit"]
 
 
 class ModifyDevice_ConfigForm(forms.ModelForm):

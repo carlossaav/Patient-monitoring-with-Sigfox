@@ -33,9 +33,8 @@ def downlink(request, dev_id):
                                      running_since=datetime_obj,
                                      last_msg_time=datetime_obj,
                                      last_dev_state=constants.FUNCTIONAL_DEV_STATUS,
-                                     last_known_latitude=constants.DEFAULT_COORDINATE,
-                                     last_known_longitude=constants.DEFAULT_COORDINATE,
-                                     uplink_count=0, downlink_count=0,
+                                     uplink_count=0,
+                                     downlink_count=0,
                                      higher_bpm_limit=dev_conf.higher_bpm_limit,
                                      lower_bpm_limit=dev_conf.lower_bpm_limit,
                                      continuous_delivery=True)
@@ -148,10 +147,8 @@ def uplink(request):
     dev_hist = models.Device_History(dev_conf=dev_conf, date=date,
                                      running_since=datetime_obj,
                                      last_msg_time=datetime_obj,
-                                     last_dev_state=constants.FUNCTIONAL_DEV_STATUS,
-                                     last_known_latitude=constants.DEFAULT_COORDINATE,
-                                     last_known_longitude=constants.DEFAULT_COORDINATE,
-                                     uplink_count=0, downlink_count=0,
+                                     uplink_count=0,
+                                     downlink_count=0,
                                      higher_bpm_limit=dev_conf.higher_bpm_limit,
                                      lower_bpm_limit=dev_conf.lower_bpm_limit,
                                      continuous_delivery=True)
@@ -230,7 +227,7 @@ def uplink(request):
     if emergency:
       # check emergency creation/reactivation
       minutes = int((utils.get_sec_diff(datetime_obj, ebio.spawn_timestamp)) // 60)
-      if (minutes >= constants.NEW_EMERG_DELAY):
+      if (minutes >= dev_conf.new_emerg_delay):
         new_e = 1 # create a new one
         if (ebio.active): # Deactivate emergency
           ebio.active = False
@@ -254,8 +251,8 @@ def uplink(request):
     if (loc_info["status"] == 1): # Geolocation successlly computed
       latitude = loc_info["lat"]
       longitude = loc_info["lng"]
-      dev_hist.last_known_latitude = str(latitude)
-      dev_hist.last_known_longitude = str(longitude)
+      dev_hist.last_known_latitude = float(latitude)
+      dev_hist.last_known_longitude = float(longitude)
   except KeyError:
     print("Geolocation not available")
 
@@ -861,9 +858,13 @@ def add_device(request):
     if (request.method == "POST"):
       form = forms.Device_ConfigForm(request.POST)
       if (form.is_valid()):
-        form.save() # Add a new device to Database
+        dev_conf = form.save(commit=False)
+        dev_conf = utils.set_device_elimits(dev_conf)
+        dev_conf.clean() # Clean form fields before saving
+        dev_conf.save() # Save cleaned instance to Database
         return HttpResponseRedirect("/sigfox_messages/")
 
+    context["new_emerg_delay"] = constants.NEW_EMERG_DELAY
     context["form"] = form
 
   return render(request, "sigfox_messages/add_device.html", context=context)
@@ -892,15 +893,13 @@ def modify_device_config(request, device_id):
         dev_conf.max_temp = form.cleaned_data["max_temp"]
         dev_conf.min_delay = form.cleaned_data["min_delay"]
         dev_conf.bpm_limit_window = form.cleaned_data["bpm_limit_window"]
-        if (dev_conf.bpm_limit_window == 0):
-          dev_conf.lower_ebpm_limit = dev_conf.lower_bpm_limit
-          dev_conf.higher_ebpm_limit = dev_conf.higher_bpm_limit
-        else:
-          dev_conf.lower_ebpm_limit = dev_conf.lower_bpm_limit - constants.LOWER_BPM_ELIMIT_SUM
-          dev_conf.higher_ebpm_limit = dev_conf.higher_bpm_limit + constants.HIGHER_BPM_ELIMIT_SUM
-        dev_conf.save()
+        dev_conf.new_emerg_delay = form.cleaned_data["new_emerg_delay"]
+        dev_conf = utils.set_device_elimits(dev_conf)
+        dev_conf.clean() # Clean submitted fields before saving
+        dev_conf.save() # Save cleaned instance to Database
         return HttpResponseRedirect("/sigfox_messages/")
 
+    context["new_emerg_delay"] = constants.NEW_EMERG_DELAY
     context["form"] = form
 
   return render(request, "sigfox_messages/modify_device_config.html", context=context)
