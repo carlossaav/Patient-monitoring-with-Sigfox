@@ -859,7 +859,7 @@ def add_device(request):
       form = forms.Device_ConfigForm(request.POST)
       if (form.is_valid()):
         dev_conf = form.save(commit=False)
-        dev_conf = utils.set_device_elimits(dev_conf)
+        utils.set_device_elimits(dev_conf)
         dev_conf.clean() # Clean form fields before saving
         dev_conf.save() # Save cleaned instance to Database
         return HttpResponseRedirect("/sigfox_messages/")
@@ -894,7 +894,7 @@ def modify_device_config(request, device_id):
         dev_conf.min_delay = form.cleaned_data["min_delay"]
         dev_conf.bpm_limit_window = form.cleaned_data["bpm_limit_window"]
         dev_conf.new_emerg_delay = form.cleaned_data["new_emerg_delay"]
-        dev_conf = utils.set_device_elimits(dev_conf)
+        utils.set_device_elimits(dev_conf)
         dev_conf.clean() # Clean submitted fields before saving
         dev_conf.save() # Save cleaned instance to Database
         return HttpResponseRedirect("/sigfox_messages/")
@@ -913,13 +913,16 @@ def device_config_detail(request, device_id):
     try:
       dev_conf = models.Device_Config.objects.get(dev_id=device_id)
       context["device"] = dev_conf
+      l = [] # Get device ranges
+      ranges = utils.get_ranges(dev_conf.lower_bpm_limit, dev_conf.higher_bpm_limit)
+      for individual_range, _ in ranges:
+        l.append(individual_range)
+      context["ranges"] = l
       patient = models.Patient.objects.get(dev_conf=dev_conf)
       context["patient"] = patient
-
       if ((not request.user.is_staff) and (request.user != patient.user)):
         return render(request, "sigfox_messages/device_config_detail.html",
                       context={"not_allowed": 1})
-
       qs_hist = models.Device_History.objects.filter(dev_conf=dev_conf)
       if (qs_hist.exists()): # There's at least one message registered from the device
         context["qs_hist"] = qs_hist
@@ -964,7 +967,7 @@ def biometrics_detail(request, biometrics_id):
       context["dev_hist"] = dev_hist
       context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
                                            dev_hist.higher_bpm_limit,
-                                           bio)
+                                           bio_obj=bio)
       if ((dev_hist.continuous_delivery) and
           (dev_hist.uplink_count > 1)):
         delta = dev_hist.last_msg_time - dev_hist.running_since
@@ -994,7 +997,7 @@ def biometrics24_detail(request, patient_id):
       context["dev_hist"] = dev_hist
       context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
                                            dev_hist.higher_bpm_limit,
-                                           bio_24)
+                                           bio_obj=bio_24)
       if ((dev_hist.continuous_delivery) and
           (dev_hist.uplink_count > 1)):
         delta = dev_hist.last_msg_time - dev_hist.running_since
@@ -1038,7 +1041,7 @@ def emergency_detail(request, emergency_id):
         context["epayload_qs"] = epayload_qs
       context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
                                            dev_hist.higher_bpm_limit,
-                                           emergency)
+                                           bio_obj=emergency)
   except models.Emergency_Biometrics.DoesNotExist:
     print("Emergency not found")
   except models.Device_History.DoesNotExist:
@@ -1062,7 +1065,7 @@ def epayload_detail(request, epayload_id):
       context["epayload"] = epayload
       context["ranges"] = utils.get_ranges(dev_hist.lower_bpm_limit,
                                            dev_hist.higher_bpm_limit,
-                                           epayload)
+                                           bio_obj=epayload)
   except models.Emergency_Payload.DoesNotExist:
     print("Epayload not found")
   except models.Device_History.DoesNotExist:

@@ -51,7 +51,7 @@ MAX_TIME_DELAY = 1360
 REGULAR_INTERVAL_DURATION = 630 # in seconds
 
 # Default mimimum time to regard a new emergency message as another emergency (in minutes)
-# Set value must be higher or equal to 1
+# This value must be higher or equal to 1
 NEW_EMERG_DELAY = 45
 
 # Mimimum time to resend a SMS notification (in minutes)

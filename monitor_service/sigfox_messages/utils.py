@@ -247,12 +247,17 @@ def get_attr_name(range_id):
     return "higher_range"
 
 
-def get_ranges(lower_bpm_limit, higher_bpm_limit, bio_obj):
+def get_ranges(lower_bpm_limit, higher_bpm_limit, bio_obj=None):
 
-  lower_rvalue = bio_obj.lower_range
-  second_rvalue = bio_obj.second_range
-  third_rvalue =  bio_obj.third_range
-  higher_rvalue =  bio_obj.higher_range
+  rvalues = []
+  if (bio_obj != None):
+    rvalues.append(bio_obj.lower_range)
+    rvalues.append(bio_obj.second_range)
+    rvalues.append(bio_obj.third_range)
+    rvalues.append(bio_obj.higher_range)
+  else:
+    for _ in range(4):
+      rvalues.append(None)
 
   aux = (higher_bpm_limit - lower_bpm_limit) // 2 # Floor division
   range_top = lower_bpm_limit + aux
@@ -264,10 +269,10 @@ def get_ranges(lower_bpm_limit, higher_bpm_limit, bio_obj):
   third_range = "[" + str(range_top+1) + ", " + str(higher_bpm_limit) + "]"
   higher_range = ">" + str(higher_bpm_limit)
 
-  return [(lower_range, lower_rvalue),
-          (second_range, second_rvalue),
-          (third_range, third_rvalue),
-          (higher_range, higher_rvalue)]
+  return [(lower_range, rvalues[0]),
+          (second_range, rvalues[1]),
+          (third_range, rvalues[2]),
+          (higher_range, rvalues[3])]
 
 
 def check_emergency_deactivation(emergency, datetime_obj):
@@ -296,8 +301,6 @@ def set_device_elimits(dev_conf):
   else:
     dev_conf.lower_ebpm_limit = dev_conf.lower_bpm_limit - constants.LOWER_BPM_ELIMIT_SUM
     dev_conf.higher_ebpm_limit = dev_conf.higher_bpm_limit + constants.HIGHER_BPM_ELIMIT_SUM
-
-  return dev_conf
 
 
 # Erase all Biometrics older than 'days' days

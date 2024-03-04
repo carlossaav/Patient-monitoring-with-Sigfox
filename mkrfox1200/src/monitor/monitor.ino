@@ -1497,14 +1497,13 @@ void limit_exceeded(byte measure, byte value) {
       // Check out when last bpm limit exceeded took place 
       unsigned long aux = tstamp - bpm_limits[i].tstamp;
       if (aux > SAMPLING_RATE) {
-        /* Continuity broken between calls to limit_exceeded().
-        * Such difference is not reflecting the real time exceeding a 
-        * bpm limit. Something happened in betweeen calls to limit_exceeded(),
-        * like a shipment, which may take more than 10 seconds to complete.
-        * Store that 'idle time' to be substracted later on 'bt' condition checking. */
+      /* Continuity broken between calls to limit_exceeded(). Such
+       * difference is not reflecting the real time exceeding a bpm
+       * limit. Something happened in betweeen calls to limit_exceeded(),
+       * like a shipment, which takes about 8 seconds to complete. Store
+       * that 'idle time' to be substracted later on 'bt' condition checking. */
 
-        // substract loop iteration time
-        idle_time += (aux - SAMPLING_RATE);
+        idle_time += (aux - SAMPLING_RATE); // substract loop iteration time
       }
     }
   }
@@ -1514,9 +1513,8 @@ void limit_exceeded(byte measure, byte value) {
   if (check_elimits(measure, value)) {
 
     if (elim)
-    /* Whatever elim has been exceeded, there's been
-      * a previous elim before this one took place
-      * that hasn't been attended yet. */
+    /* Whatever elimit was exceeded, a prior elimit had occurred
+     * before this one arose that hasn't yet been addressed */
       return;
 
     elim = 1;
@@ -1540,8 +1538,8 @@ void limit_exceeded(byte measure, byte value) {
      ((tstamp - bpm_limits[i].tstamp) <= both_exceeded_delay) &&
      fire_epol(0))
   {
-    /* max and min limits of bpm violated within 'both_exceeded_delay' 
-     * period ('bx' value). Activate Emergency shipment's policy. */
+   /* max and min limits of bpm violated within 'both_exceeded_delay' 
+    * period ('bx' value). Activate Emergency shipment's policy. */
     act_emergency();
     ereason_payload = 1;
     sched_shipment(0);
@@ -1549,13 +1547,13 @@ void limit_exceeded(byte measure, byte value) {
     return;
   }
 
-   /* If 'bx' 'didn't trigger epol, then check out for 'bt' condition,
+   /* If 'bx' didn't trigger epol, then check out for 'bt' condition,
     * (again, from downlink payload) */
 
   if ((((tstamp - *bpm_lim_cond_timestamp) - idle_time) >= bpm_lim_epol_trigg) &&
       fire_epol(0))
   {
-    /* Emergency condition kept over 'bpm_lim_epol_trigg' milliseconds.
+   /* Emergency condition kept over 'bpm_lim_epol_trigg' milliseconds.
     * Activate Emergency shipment's policy. */
     act_emergency();
     ereason_payload = 1;

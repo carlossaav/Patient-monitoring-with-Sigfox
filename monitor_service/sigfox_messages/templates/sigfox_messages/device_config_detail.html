@@ -28,6 +28,21 @@
         {{ device.lower_ebpm_limit }}</li>
         <li class="list-group-item"><strong>Higher bpm limit configured:</strong> {{ device.higher_bpm_limit }}</li>
         <li class="list-group-item"><strong>Lower bpm limit configured:</strong> {{ device.lower_bpm_limit }}</li>
+        <div class="card mt-2">
+          <div class="card-body">
+            <h5 style="color: red;" class="card-title">Distribution of BPM ranges (based on provided bpm limits)</h5>
+            {% if ranges %}
+              <ul class="list-group">
+                <li class="list-group-item"><strong>Lower BPM range configured: </strong>{{ ranges.0 }} bpm</li>
+                <li class="list-group-item"><strong>Second BPM range configured: </strong>{{ ranges.1 }} bpm</li>
+                <li class="list-group-item"><strong>Third BPM range configured: </strong>{{ ranges.2 }} bpm</li>
+                <li class="list-group-item"><strong>Higher BPM range configured: </strong>{{ ranges.3 }} bpm</li>
+              </ul>
+            {% else %}
+              <p><strong>BPM Ranges not available</strong></p>
+            {% endif %}
+          </div>
+        </div>
         <li class="list-group-item"><strong>Higher temperature limit configured:</strong> {{ device.max_temp}}</li>
         <li class="list-group-item"><strong>Lower temperature limit configured:</strong> {{ device.min_temp }}</li>
         <li class="list-group-item"><strong>Bpm limit window* (in seconds):</strong> {{ device.bpm_limit_window }}</li>
