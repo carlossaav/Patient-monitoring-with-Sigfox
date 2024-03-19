@@ -506,10 +506,9 @@ def index(request):
       if (emerg_qs.exists()):
         emergency_list = []
         for emergency in emerg_qs:
-          if (emergency.active):
-            emergency = utils.check_emergency_deactivation(emergency, datetime_obj)
-            if (emergency.active): # Check whether it's still active
-              emergency_list.append(emergency)
+          emergency = utils.check_emergency_deactivation(emergency, datetime_obj)
+          if (emergency.active): # Check whether it's still active
+            emergency_list.append(emergency)
         if (emergency_list != []):
           context["emergency_list"] = emergency_list
     else: # Regular user

@@ -27,7 +27,7 @@
             </p>
             {% if dev_hist.continuous_delivery == False %}
               <p>Since device's message delivery wasn't continuous in time since it started collecting
-              samples, we can't ensure time gap between last message and device's boot time is effectively equal 
+              samples, we can't ensure that the time gap between last message and device's boot timestamp is effectively equal 
               to sampling's interval duration.</p>
             {% else %}
               {% if dev_hist.uplink_count == 1 %}
